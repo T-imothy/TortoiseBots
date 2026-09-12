@@ -91,7 +91,20 @@ namespace ai
         //Setters
         void setComplete(bool complete1) { complete = complete1; }
         void setPath(std::vector<WorldPosition> path1) { path = path1; }
-        void setPathAndCost(std::vector<WorldPosition> path1, float speed) { setPath(path1); calculateCost(true); extraCost = distance / speed; }
+        void setPathAndCost(std::vector<WorldPosition> path1, float speed)
+        {
+            setPath(path1);
+
+            // Persisted special paths are already marked calculated. Temporarily
+            // clear that flag so their real distance can still be rebuilt from
+            // the loaded points and stale generated costs can be normalized.
+            bool const wasCalculated = calculated;
+            calculated = false;
+            calculateCost(true);
+            calculated = wasCalculated;
+
+            extraCost = speed > 0.0f ? distance / speed : 0.0f;
+        }
         //void setPortal(bool portal1, uint32 portalId1 = 0) { portal = portal1; portalId = portalId1; }
         //void setTransport(bool transport1) { transport = transport1; }
         void setPathType(TravelNodePathType pathType1) { pathType = pathType1; }

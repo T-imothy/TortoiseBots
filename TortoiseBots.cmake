@@ -45,6 +45,10 @@ if(TORTOISE_MODULE_CMAKE_PHASE STREQUAL "DISCOVERY")
     COPYONLY)
   install(FILES "${TORTOISEBOTS_AI_CONFIG}" DESTINATION "${CONF_DIR}")
 
+  configure_file("${TORTOISEBOTS_ROOT}/ahbot/ahbot.conf.dist.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/ahbot.conf" COPYONLY)
+  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/ahbot.conf" DESTINATION "${CONF_DIR}")
+
   configure_file(
     "${TORTOISEBOTS_ROOT}/conf/tortoise_bots.conf.dist"
     "${CMAKE_CURRENT_BINARY_DIR}/tortoise_bots.conf"
@@ -70,6 +74,7 @@ if(TORTOISE_MODULE_CMAKE_PHASE STREQUAL "DISCOVERY")
   set(TORTOISEBOTS_HOST_SRC
     "${TORTOISEBOTS_ROOT}/host/Module.cpp"
     "${TORTOISEBOTS_ROOT}/host/BotHostAdapter.cpp"
+    "${TORTOISEBOTS_ROOT}/host/BotCombatTelemetry.cpp"
     "${TORTOISEBOTS_ROOT}/host/BotSessionAdapter.cpp"
     "${TORTOISEBOTS_ROOT}/host/BotChatAdapter.cpp"
     "${TORTOISEBOTS_ROOT}/host/BotPacketAdapter.cpp"
@@ -80,6 +85,7 @@ if(TORTOISE_MODULE_CMAKE_PHASE STREQUAL "DISCOVERY")
     "${TORTOISEBOTS_ROOT}/runtime/RandomBotService.cpp"
     "${TORTOISEBOTS_ROOT}/runtime/LftBotFillService.cpp"
     "${TORTOISEBOTS_ROOT}/runtime/AhMarketService.cpp"
+    "${TORTOISEBOTS_ROOT}/ahbot/AhBot.cpp"
     "${TORTOISEBOTS_ROOT}/runtime/BattlegroundQueueService.cpp"
     "${TORTOISEBOTS_ROOT}/runtime/PlayerbotAIStorage.cpp"
     "${TORTOISEBOTS_ROOT}/runtime/PlayerbotAIAdapter.cpp"
@@ -204,7 +210,14 @@ if(TORTOISE_MODULE_CMAKE_PHASE STREQUAL "POST_TARGETS")
     target_compile_definitions("${TORTOISEBOTS_TARGET}" PRIVATE
       MANGOSBOT_ZERO=1
       CMANGOS=1)
+    # The Windows host may point directly at the openssl/ directory, while
+    # module TLS sources use the portable <openssl/ssl.h> spelling.
+    set(TORTOISEBOTS_OPENSSL_INCLUDE "${OPENSSL_INCLUDE_DIR}")
+    if(EXISTS "${OPENSSL_INCLUDE_DIR}/ssl.h" AND NOT EXISTS "${OPENSSL_INCLUDE_DIR}/openssl/ssl.h")
+      get_filename_component(TORTOISEBOTS_OPENSSL_INCLUDE "${OPENSSL_INCLUDE_DIR}" DIRECTORY)
+    endif()
     target_include_directories("${TORTOISEBOTS_TARGET}" PRIVATE
+      "${TORTOISEBOTS_OPENSSL_INCLUDE}"
       "${TORTOISEBOTS_ROOT}"
       "${TORTOISEBOTS_ROOT}/ai"
       "${TORTOISEBOTS_ROOT}/ai/playerbot"

@@ -1479,3 +1479,48 @@ Local validation:
 - `bash tools/verify_tortoise_surface.sh` (exit code 0).
 - `bash tools/verify_penqle_host_contract.sh --core ../tortoise-wow` (exit code 0).
 - Docker native static builder `./dev/build-playerbots` passed (`[100%] Built target mangosd`).
+
+## ManTech CMaNGOS AHBot preservation (2026-09-12)
+
+- Source repository: `T-imothy/tortoise-wow`.
+- Source commit: `37aee50d6bfbf9194dd5e3c79a156d9bfcb4f569` (includes CMaNGOS
+  port `3d6f54b9`, bounded market `0c322d52`, and ownership fix `94c76b96`).
+- Source files: `modules/mod-playerbots/src/ahbot/{AhBot.cpp,AhBot.h,MarketPolicy.h,ahbot.conf.dist.in}`.
+- Ported the isolated market service and preserved its GPL attribution.
+- Replaced the old bot-tree dependency with this module's existing
+  `PlayerbotAIConfig::IsInRandomAccountList`; native core auction, loot,
+  hardcore and work-budget APIs retain their contracts.
+- Startup/update and command dispatch now belong to this module. One explicit
+  controller selector prevents the two auction engines executing together.
+- Validation: focused native market/ownership/dispatch regressions and module
+  compilation are tracked in the core migration checklist; live DB/gameplay
+  validation remains pending.
+
+## ManTech taxi refresh preservation (2026-09-12)
+
+- Source: `T-imothy/tortoise-wow` commit `258e6db5`, included in preserved
+  baseline `37aee50d6bfbf9194dd5e3c79a156d9bfcb4f569`.
+- Files: `modules/mod-playerbots/src/playerbot/TravelNode.{cpp,h}`.
+- Ported the native taxi-ID/geometry refresh and calculated-path cost reset;
+  adapted the current module's `GetNode` spelling. Retained its startup caller.
+- Validate missing path vectors, sparse null nodes, repeated refresh, unrelated
+  edges and cached distance/time with `ModuleTaxiCacheRefreshTest`.
+- This does not certify taxi handoff, destination selection, walking graph
+  generation, or movement behavior; those remain separate migration work.
+
+## Auction host compatibility and diagnostics (2026-09-12)
+
+- Adapted module readers to the preserved ManTech core auction lock/snapshot
+  contract instead of restoring the unsafe raw `GetAuctions()` accessor.
+  Captured native buyout identity before deletion; snapshot appraisal uses
+  saved item counts and retains native fields required by callers.
+- Independently adapted command registration to existing native CommandScript
+  and ModuleHandler facilities. Preserved administrator authorization for both
+  the AH alias and SOAP; no new command dispatcher was added to the core.
+- Ported the existing `BotActionLog_*` observation positions from ManTech
+  baseline `37aee50d6bfbf9194dd5e3c79a156d9bfcb4f569` to generic script callbacks;
+  the module owns the adapter and logger. Documented per-effect apply events.
+- Nine focused native-fragment regressions passed, including auction
+  ownership/settlement, native permissions/dispatch, trainer, SOAP and module
+  taxi refresh. The whole-module Release build linked successfully. Runtime
+  validation and the remaining migration behaviors are separate gates.

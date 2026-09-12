@@ -13,8 +13,11 @@
 
 namespace TortoiseBots {
 
+void RegisterCombatTelemetry();
+
 void RegisterScripts()
 {
+    RegisterCombatTelemetry();
     new BotHostAdapter();
     new LftFillAdapter();
     new BotPacketAdapter();

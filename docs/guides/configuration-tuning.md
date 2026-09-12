@@ -98,3 +98,12 @@ Using `.bot strategy <+|-strategy>` or the `/tbm` addon:
 - `+silent` / `-silent` — Silences bot chatter in party/say chat so they execute commands quietly.
 - `+passive` / `-passive` — Halts all bot attacks; bots will only follow and hold fire.
 - `.bot formation <arrow|line|circle|shield>` — Changes follow positioning around the leader.
+
+## ManTech market preservation
+
+`AiPlayerbot.AhMarketUseCMaNGOS = 1` selects the ported market and its
+`ahbot.conf` settings (`AhBot.Enabled`, `AuctionHouseBot.*`). The existing
+`AiPlayerbot.AhMarket*` settings describe the alternative module market and
+are used only when this selector is zero. Restart after changing the selector.
+The main configuration can set `AhBot.ConfigFile` to an explicit path.
+CMaNGOS owner eligibility uses this module's verified random-account list.

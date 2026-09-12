@@ -18,8 +18,8 @@ test -f data/sql/world/20260824090002_world.sql || fail "world compatibility mig
 test -f data/sql/char/20260824090002_char.sql || fail "character compatibility migration is missing"
 test -f data/sql/world/20260824090003_world.sql || fail "world cleanup migration is missing"
 test -f data/sql/char/20260824090003_char.sql || fail "character cleanup migration is missing"
-test ! -e data/sql/World || fail "uppercase World migration directory remains"
-test ! -e data/sql/Char || fail "uppercase Char migration directory remains"
+test -z "$(find data/sql -maxdepth 1 -name World -print)" || fail "uppercase World migration directory remains"
+test -z "$(find data/sql -maxdepth 1 -name Char -print)" || fail "uppercase Char migration directory remains"
 
 grep -q 'template_changed' data/sql/world/20260824090002_world.sql \
     || fail "help schema lacks template_changed"

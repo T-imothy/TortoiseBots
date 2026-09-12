@@ -895,13 +895,14 @@ bool AhMarketService::BuyAuctionCandidate(AuctionEntry* auction, AuctionHouseObj
     if (!BotActivityLeaseManager::Instance().TryAcquire(buyer->GetGUIDLow(), BotActivity::Trading, 120000))
         return false;
 
+    uint32 const auctionId = auction->Id;
     buyer->GetSession()->HandleAuctionPlaceBid(packet);
     BotActivity restore = previousActivity == BotActivity::Grinding
         ? BotActivity::Grinding : BotActivity::Idle;
     BotActivityLeaseManager::Instance().Release(buyer->GetGUIDLow(), BotActivity::Trading, restore);
     ++m_totalBought;
     sLog.outString("TortoiseBots: AhMarket buyer %s placed %s on auc %u (item %s x%u) for %u",
-        buyer->GetName(), canBuyout ? "buyout" : "bid", auction->Id, proto->Name1.c_str(), count, targetPrice);
+        buyer->GetName(), canBuyout ? "buyout" : "bid", auctionId, proto->Name1.c_str(), count, targetPrice);
 
     return true;
 }
@@ -1136,28 +1137,25 @@ void AhMarketService::StepBuy()
     }
 
     AuctionHouseObject* ahObject = sAuctionMgr.GetAuctionsMap(ahEntry);
-    if (!ahObject || !ahObject->GetAuctions())
+    if (!ahObject)
     {
         FinishPass();
         return;
     }
 
-    auto const* auctions = ahObject->GetAuctions();
-    if (auctions->empty())
+    auto const page = ahObject->GetAuctionsSnapshotPage(m_scanCursor, 1);
+    if (page.empty())
     {
         FinishPass();
         return;
     }
-
-    auto it = auctions->upper_bound(m_scanCursor);
-    if (it == auctions->end())
-    {
-        FinishPass();
+    m_scanCursor = page.front().Id;
+    // A copied page carries identity, not lifetime. Re-resolve under the
+    // native house lock and retain it through the native bid operation.
+    AuctionHouseObject::Guard guard(ahObject->GetLock());
+    AuctionEntry* auction = ahObject->GetAuction(m_scanCursor);
+    if (!auction)
         return;
-    }
-
-    AuctionEntry* auction = it->second;
-    m_scanCursor = auction->Id;
 
     BuyAuctionCandidate(auction, ahObject);
 }
@@ -1180,15 +1178,14 @@ void AhMarketService::StepExpire()
     }
 
     AuctionHouseObject* ahObject = sAuctionMgr.GetAuctionsMap(ahEntry);
-    if (!ahObject || !ahObject->GetAuctions())
+    if (!ahObject)
     {
         FinishPass();
         return;
     }
 
-    auto const* auctions = ahObject->GetAuctions();
-    auto it = auctions->upper_bound(m_scanCursor);
-    if (it == auctions->end())
+    auto const page = ahObject->GetAuctionsSnapshotPage(m_scanCursor, 1);
+    if (page.empty())
     {
         ++m_scanHouse;
         m_scanCursor = 0;
@@ -1200,8 +1197,11 @@ void AhMarketService::StepExpire()
         return;
     }
 
-    AuctionEntry* auction = it->second;
-    m_scanCursor = auction->Id;
+    m_scanCursor = page.front().Id;
+    AuctionHouseObject::Guard guard(ahObject->GetLock());
+    AuctionEntry* auction = ahObject->GetAuction(m_scanCursor);
+    if (!auction)
+        return;
 
     if (!IsSyntheticAuction(auction))
         return;
@@ -1237,7 +1237,7 @@ void AhMarketService::FinishPass()
 
 void AhMarketService::Update(uint32_t diff)
 {
-    if (!sPlayerbotAIConfig.ahMarketEnabled)
+    if (sPlayerbotAIConfig.ahMarketUseCMaNGOS || !sPlayerbotAIConfig.ahMarketEnabled)
         return;
     if (!sPlayerbotAIConfig.enabled || !sPlayerbotAIConfig.randomBotAutologin)
         return;

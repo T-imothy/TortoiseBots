@@ -487,3 +487,25 @@ core gameplay code, redesign it.
 ## 21. Historical closure
 
 F-03/F-27 closure and validation boundary are recorded in `PLAN.md` §6.1 and `PROVENANCE.md`; full historical audit evidence is preserved in Git history. This contract covers only the current host API.
+
+## ManTech migration host additions (candidate; 2026-09-12)
+
+The ManTech target retains generic map-owner AI scheduling, auction snapshot
+ownership and priority network login queries. Full scheduling adaptation is
+still pending; a successful build is not performance parity with the old fork.
+
+- `CommandScript::GetCommands` plus `ChatCommand::ModuleHandler` register `.bot`
+  and `.ahbot` through native security/RBAC/console handling. The module no
+  longer intercepts `.bot` before core authorization. The AH handler checks
+  the native registered AH command permission again for the `.bot ah` alias and SOAP.
+- `AuctionHouseAdapter` copies native entries while `GetLock()` is held.
+  Background paging uses `GetAuctionsSnapshotPage`; lookups that require a
+  live entry retain the same lock through native mutation. Read snapshots do
+  not grant permission to mutate: bid/removal still use the native handlers.
+- `UnitScript::OnDamageAttempt`, `OnAuraHolderAttempt`, `OnAuraHolderRemoval`
+  expose values at native observation points; `AllSpellScript::OnCastAttempt`
+  and `OnCastFinished` supply diagnostic values without changing spell control.
+  `BotCombatTelemetry` owns bot meaning and logging; the core remains optional.
+
+Validation receipts and the exact candidate state are tracked in the core's
+`docs/MODULAR_MIGRATION_CHECKLIST.md`. Production has not been changed.

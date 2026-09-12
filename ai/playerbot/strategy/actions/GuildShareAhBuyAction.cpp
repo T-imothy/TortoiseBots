@@ -1,5 +1,6 @@
 #include "playerbot/playerbot.h"
 #include "GuildShareAhBuyAction.h"
+#include "host/AuctionHouseAdapter.h"
 #include "playerbot/strategy/values/BudgetValues.h"
 #include "playerbot/strategy/values/ItemUsageValue.h"
 #include "playerbot/ServerFacade.h"
@@ -233,21 +234,19 @@ bool GuildShareAhBuyAction::Execute(Event& event)
     AuctionCandidate bestCandidate = { 0, 0, 0, 0, 0, false };
     uint32 bestPricePerItem = std::numeric_limits<uint32>::max();
 
-    for (auto const& auctionEntry : *auctionHouse->GetAuctions())
+    for (auto const& snapshot : auctionHouse->GetAuctionsSnapshot())
     {
-            AuctionEntry* auction = auctionEntry.second;
-            if (!auction || auction->buyout == 0)
+            AuctionSnapshot const* auction = &snapshot;
+            if (auction->buyout == 0)
                 continue; // Skip auctions with no buyout
 
             if (auction->owner == bot->GetGUIDLow())
                 continue;
 
-            Item* item = sAuctionMgr.GetAItem(auction->itemGuidLow);
-            if (!item)
+            uint32 auctionItemId = auction->itemTemplate;
+            uint32 auctionCount = auction->itemCount;
+            if (!auctionCount || !sObjectMgr.GetItemPrototype(auctionItemId))
                 continue;
-
-            uint32 auctionItemId = item->GetProto()->ItemId;
-            uint32 auctionCount = item->GetCount();
 
             auto it = neededItems.find(auctionItemId);
             if (it == neededItems.end())

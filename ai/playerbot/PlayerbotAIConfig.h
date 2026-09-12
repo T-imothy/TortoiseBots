@@ -153,6 +153,8 @@ public:
     bool botsSaveEpics;
     uint32 auctionPriceRefreshInterval = 60; // seconds between price mirror refreshes
     // Default-off bounded AH market population (module-only, native transaction path).
+    // Select one auction controller; never run both supplier/buyers.
+    bool ahMarketUseCMaNGOS = true;
     bool ahMarketEnabled = false;
     uint32 ahMarketInterval = 120; // seconds between market ticks
     uint32 ahMarketBatchSize = 1;  // max auctions posted per tick

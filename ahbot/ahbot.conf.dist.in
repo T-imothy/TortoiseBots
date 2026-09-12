@@ -1,0 +1,51 @@
+# CMaNGOS-style auction supplier/buyer, adapted to Turtle native transactions.
+# Old AhBot category/maximum-count settings no longer apply.
+# This template matches the sampled Classic market settings (2026-09-06).
+# Random-bot characters own stock; real player accounts are never synthetic bidders.
+[AhBotConf]
+ConfVersion = 2021011201
+AhBot.Enabled = 1
+AuctionHouseBot.Chance.Sell = 10
+AuctionHouseBot.Chance.Buy = 10
+# Four numbers: template selections min/max, repeat loot rolls min/max.
+# A negative selection minimum makes an entire source probabilistic.
+AuctionHouseBot.Loot.Creature.Normal = 30,35,8,12
+AuctionHouseBot.Loot.Creature.Rare = 0,10,1,1
+AuctionHouseBot.Loot.Creature.Elite = 30,34,1,2
+AuctionHouseBot.Loot.Creature.RareElite = -10,2,1,1
+AuctionHouseBot.Loot.Creature.WorldBoss = -20,1,1,1
+AuctionHouseBot.Loot.Disenchant = 10,12,1,1
+AuctionHouseBot.Loot.Fishing = 3,5,30,40
+AuctionHouseBot.Loot.Gameobject = 13,16,7,11
+AuctionHouseBot.Loot.Skinning = 3,5,50,50
+# Craft selections min/max; quantity as percent of the item's maximum stack.
+AuctionHouseBot.Items.Profession = 80,90,0,50
+# Percentages by CMaNGOS item class (17 columns; Turtle uses classes 0-15).
+AuctionHouseBot.Value.Poor = 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+AuctionHouseBot.Value.Normal = 100,100,0,100,0,100,100,100,0,100,0,100,100,100,0,100,100
+AuctionHouseBot.Value.Uncommon = 200,200,200,200,200,200,200,200,0,200,0,200,200,200,0,200,200
+AuctionHouseBot.Value.Rare = 400,400,400,400,400,400,400,400,0,400,0,400,400,400,0,400,400
+AuctionHouseBot.Value.Epic = 800,800,800,800,800,800,800,800,0,800,0,800,800,800,0,800,800
+AuctionHouseBot.Value.Legendary = 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+AuctionHouseBot.Value.Artifact = 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+AuctionHouseBot.Value.Vendor = 1
+AuctionHouseBot.Value.Variance = 10
+AuctionHouseBot.Bid.Min = 75
+AuctionHouseBot.Bid.Max = 90
+AuctionHouseBot.Time.Min = 2
+AuctionHouseBot.Time.Max = 24
+# Applied to buyer valuation; zero disables profitable bids/buyouts.
+AuctionHouseBot.Buy.Value = 80
+AuctionHouseBot.Level.DynamicMaxRequired = 0
+AuctionHouseBot.Level.IgnoreGmAccounts = 0
+AuctionHouseBot.Level.DynamicRefreshInterval = 10
+AuctionHouseBot.Level.MaxRequired = 60
+# Cooperative world-owner maintenance budget, not a stock cap.
+# Single native operations are indivisible; status reports observed slice costs.
+AuctionHouseBot.Work.BudgetUs = 2000
+AuctionHouseBot.Work.MaxOperations = 32
+# Commands: .ahbot reload; .ahbot rebuild [all]; .ahbot status [all];
+# .ahbot item <id> [value [chance [min [max]]]]; .ahbot item <id> reset
+# Rebuild preserves player bids unless 'all', uses native expiry, then simulates
+# average stock age with CMaNGOS's mean-duration * 90 sell-only checks.
+# Resulting stock volume depends on Turtle loot/crafting content and drop rates.

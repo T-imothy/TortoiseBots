@@ -8,6 +8,7 @@
 #include "../behavior/PlayerConvenience.h"
 // pi-lens-ignore: clang:pp_file_not_found
 #include "../runtime/AhMarketService.h"
+#include "../ahbot/AhBot.h"
 // pi-lens-ignore: clang:pp_file_not_found
 #include "../runtime/PlayerbotAIStorage.h"
 // pi-lens-ignore: clang:pp_file_not_found
@@ -1584,18 +1585,8 @@ static bool HandleAction(ChatHandler* handler, char const* args)
     return true;
 }
 
-static bool HandleAhBot(ChatHandler* handler, char const* args)
+static bool HandleModuleAhBot(ChatHandler* handler, char const* args)
 {
-    if (!handler)
-        return false;
-
-    Player* requester = Requester(handler);
-    if (requester && !IsBotAdministrator(requester))
-    {
-        handler->PSendSysMessage("You do not have permission to manage the AH bot.");
-        return true;
-    }
-
     std::string argStr = args ? args : "";
     argStr = Trim(argStr);
     if (argStr.empty() || argStr == "help")
@@ -1712,6 +1703,26 @@ static bool HandleAhBot(ChatHandler* handler, char const* args)
     return true;
 }
 
+static bool HandleAhBot(ChatHandler* handler, char const* args)
+{
+    if (!handler)
+        return false;
+
+    // Authorize the alias using the actual registered AH command, not
+    // Player presence: authenticated SOAP callers need native checks too.
+    ChatCommand const* auctionCommand = handler->FindCommand("ahbot");
+    if (!auctionCommand || !handler->IsCommandAvailable(*auctionCommand))
+    {
+        handler->PSendSysMessage("You do not have permission to manage the AH bot.");
+        return true;
+    }
+
+    if (sPlayerbotAIConfig.ahMarketUseCMaNGOS)
+        return ahbot::AhBot::HandleAhBotCommand(handler, args);
+
+    return HandleModuleAhBot(handler, args);
+}
+
 // pi-lens-ignore: clang:incomplete_member_access,clang:unknown_typename
 bool HandleChatCommand(ChatHandler* handler, char const* args)
 {
@@ -1792,6 +1803,11 @@ bool HandleChatCommand(ChatHandler* handler, char const* args)
 
     handler->PSendSysMessage("Unknown bot command '%s'. Try .bot help", cmd.c_str());
     return true;
+}
+
+bool HandleAuctionCommand(ChatHandler* handler, char const* args)
+{
+    return HandleAhBot(handler, args);
 }
 
 // pi-lens-ignore: clang:incomplete_member_access

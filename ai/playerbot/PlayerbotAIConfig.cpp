@@ -312,6 +312,7 @@ bool PlayerbotAIConfig::Initialize()
     // Default-off bounded AH market population. Interval is seconds, batch is
     // max auctions per tick (hard capped at 5 in service). No AH scan or DB
     // query per tick; uses legitimate inventory + native HandleAuctionSellItem.
+    ahMarketUseCMaNGOS = config.GetBoolDefault("AiPlayerbot.AhMarketUseCMaNGOS", true);
     ahMarketEnabled = config.GetBoolDefault("AiPlayerbot.AhMarketEnabled", false);
     ahMarketInterval = (uint32)config.GetIntDefault("AiPlayerbot.AhMarketInterval", 120);
     if (ahMarketInterval < 5) ahMarketInterval = 5;

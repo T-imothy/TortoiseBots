@@ -149,3 +149,17 @@ AiPlayerbot.AhMarketEnabled = 1
 AiPlayerbot.RandomBotLftEnabled = 1
 AiPlayerbot.RandomBotBgEnabled = 1
 ```
+
+## ManTech auction controller
+
+This fork defaults to `AiPlayerbot.AhMarketUseCMaNGOS = 1`. The preserved
+CMaNGOS-policy service reads `ahbot.conf` beside the main configuration
+(or `AhBot.ConfigFile` in the main configuration). It uses native loot and
+profession supplies, verified random-bot character ownership, bounded world-owner
+work slices, native auction settlement and the existing `ahbot_items` overrides.
+It does not teleport sellers or use owner GUID zero.
+
+The `AhMarketService` behavior above applies only with
+`AiPlayerbot.AhMarketUseCMaNGOS = 0`; its separate `AhMarketEnabled` switch still
+applies then. The host dispatches only the selected service, and the module
+market also rejects updates while CMaNGOS is selected. Restart to switch controllers.

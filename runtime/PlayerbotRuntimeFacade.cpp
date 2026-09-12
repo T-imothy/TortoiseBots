@@ -4,6 +4,7 @@
 // do not own sessions, players, AI instances, or random-bot population.
 
 #include "../ai/playerbot/RandomBotFacade.h"
+#include "../host/AuctionHouseAdapter.h"
 
 #include "../ai/playerbot/PlayerbotAI.h"
 #include "../ai/playerbot/PlayerbotAIConfig.h"
@@ -292,22 +293,15 @@ void RandomBotFacade::LoadAuctionPrices()
             continue;
         visited.push_back(auctionHouse);
 
-        AuctionHouseObject::AuctionEntryMap const* auctions = auctionHouse->GetAuctions();
-        if (!auctions)
-            continue;
-
-        for (auto const& pair : *auctions)
+        for (auto const& snapshot : TortoiseBots::CopyAuctionEntries(*auctionHouse))
         {
-            AuctionEntry const* entry = pair.second;
-            if (!entry)
-                continue;
+            AuctionEntry const* entry = &snapshot;
 
             // Only consider buyout listings for unit-price appraisal
             if (!entry->buyout)
                 continue;
 
-            Item const* item = sAuctionMgr.GetAItem(entry->itemGuidLow);
-            if (!item || !item->GetCount())
+            if (!entry->itemCount)
                 continue;
 
             // Bounded per-item listings: keep up to 64 lowest-unit-price entries
@@ -320,13 +314,12 @@ void RandomBotFacade::LoadAuctionPrices()
             }
             else
             {
-                float currentUnitPrice = float(entry->buyout) / float(item->GetCount());
+                float currentUnitPrice = float(entry->buyout) / float(entry->itemCount);
                 size_t maxIdx = 0;
                 float maxUnitPrice = 0.0f;
                 for (size_t idx = 0; idx < listings.size(); ++idx)
                 {
-                    Item const* existingItem = sAuctionMgr.GetAItem(listings[idx].itemGuidLow);
-                    uint32 existingCount = existingItem ? existingItem->GetCount() : 1;
+                    uint32 existingCount = std::max<uint32>(1, listings[idx].itemCount);
                     float existingUnitPrice = float(listings[idx].buyout) / float(existingCount);
                     if (existingUnitPrice > maxUnitPrice)
                     {

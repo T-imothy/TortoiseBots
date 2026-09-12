@@ -2776,6 +2776,9 @@ void TravelNodeMap::generateHelperNodes()
 
 void TravelNodeMap::generateTaxiPaths()
 {
+    uint32 generated = 0;
+    uint32 correctedIds = 0;
+    uint32 incomplete = 0;
     for (uint32 i = 0; i < sTaxiPathStore.GetNumRows(); ++i)
     {
         TaxiPathEntry const* taxiPath = sTaxiPathStore.LookupEntry(i);
@@ -2793,41 +2796,57 @@ void TravelNodeMap::generateTaxiPaths()
         if (!endTaxiNode)
             continue;
 
-        TaxiPathNodeList const& nodes = sTaxiPathNodesByPath[taxiPath->ID];
-
-        if (nodes.empty())
-            continue;
-
         WorldPosition startPos(startTaxiNode->map_id, startTaxiNode->x, startTaxiNode->y, startTaxiNode->z);
         WorldPosition endPos(endTaxiNode->map_id, endTaxiNode->x, endTaxiNode->y, endTaxiNode->z);
 
         TravelNode* startNode = sTravelNodeMap.GetNode(startPos, nullptr, 15.0f);
         TravelNode* endNode = sTravelNodeMap.GetNode(endPos, nullptr, 15.0f);
 
-        if (!startNode || !endNode)
+        if (!startNode || !endNode || startNode == endNode)
             continue;
+
+        // DBC path indexes can be sparse. Never dereference a missing point
+        // when refreshing a loaded graph (or generating one for the first time).
+        if (taxiPath->ID >= sTaxiPathNodesByPath.size())
+        {
+            ++incomplete;
+            continue;
+        }
+        TaxiPathNodeList const& nodes = sTaxiPathNodesByPath[taxiPath->ID];
+        if (nodes.empty() || std::any_of(nodes.begin(), nodes.end(),
+            [](TaxiPathNodePtr const& node) { return !node.i_ptr; }))
+        {
+            ++incomplete;
+            continue;
+        }
 
         std::vector<WorldPosition> ppath;
 
-        if (startNode->fDist(WorldPosition(nodes[0].mapid, nodes[0].x, nodes[0].y, nodes[0].z, 0.0)) > 0.1f)
+        if (startNode->fDist(WorldPosition(nodes.front()->mapid, nodes.front()->x, nodes.front()->y, nodes.front()->z, 0.0)) > 0.1f)
             ppath.push_back(*startNode->getPosition());
 
-        for (size_t nodeIndex = 0; nodeIndex < nodes.size(); ++nodeIndex)
-        {
-            auto const& n = nodes[nodeIndex];
-            ppath.push_back(WorldPosition(n.mapid, n.x, n.y, n.z, 0.0));
-        }
+        for (auto& n : nodes)
+            ppath.push_back(WorldPosition(n->mapid, n->x, n->y, n->z, 0.0));
 
         if (endNode->fDist(ppath.back()) > 0.1f)
             ppath.push_back(*endNode->getPosition());
 
-        float totalTime = GetTaxiRouteCost(startPos.GetPathLength(ppath));
+        if (startNode->hasPathTo(endNode))
+        {
+            TravelNodePath* cached = startNode->getPathTo(endNode);
+            if (cached->getPathType() == TravelNodePathType::flightPath &&
+                cached->getPathObject() != taxiPath->ID)
+                ++correctedIds;
+        }
 
-        TravelNodePath travelPath(0.1f, totalTime, (uint8)TravelNodePathType::flightPath, i, true);
-        travelPath.setPath(ppath);
+        TravelNodePath travelPath(0.1f, 0.0f, (uint8)TravelNodePathType::flightPath, taxiPath->ID, true);
+        travelPath.setPathAndCost(ppath, PLAYERBOT_TAXI_ROUTE_DIVISOR);
 
         startNode->setPathTo(endNode, travelPath);
+        ++generated;
     }
+    sLog.outString(">> Refreshed %u bot taxi links from native data (%u corrected cached IDs, %u incomplete paths skipped).",
+        generated, correctedIds, incomplete);
 }
 
 void TravelNodeMap::removeLowNodes()

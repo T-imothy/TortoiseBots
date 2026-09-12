@@ -5,6 +5,7 @@
 #include "../runtime/BotManager.h"
 #include "../runtime/RandomBotService.h"
 #include "../runtime/AhMarketService.h"
+#include "../ahbot/AhBot.h"
 #include "../runtime/BattlegroundQueueService.h"
 #include "../runtime/ObservabilityEmitter.h"
 #include "../ai/playerbot/PlayerbotAIConfig.h"
@@ -71,6 +72,8 @@ void BotHostAdapter::OnStartup()
     bool configured = sPlayerbotAIConfig.Initialize();
     RandomBotService::Instance().Initialize();
     BattlegroundQueueService::Instance().Initialize();
+    if (configured && sPlayerbotAIConfig.ahMarketUseCMaNGOS)
+        auctionbot.Init();
 
     if (sConfig.GetBoolDefault("TortoiseBots.PendingAddRemoveTest", false))
     {
@@ -117,7 +120,12 @@ void BotHostAdapter::OnUpdate(uint32 diff)
     BotManager::Instance().OnWorldUpdate(diff);
     PlayerConvenience::Instance().Update(diff);
     RandomBotService::Instance().Update(diff);
-    AhMarketService::Instance().Update(diff);
+    // WorldScript runs after joined map/session work. Keep auction
+    // mutations on this owner and preserve the bounded market slices.
+    if (sPlayerbotAIConfig.ahMarketUseCMaNGOS)
+        auctionbot.Update();
+    else
+        AhMarketService::Instance().Update(diff);
     BattlegroundQueueService::Instance().Update(diff);
     ObservabilityEmitter::Instance().Update(diff);
 }

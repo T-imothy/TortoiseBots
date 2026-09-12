@@ -135,6 +135,11 @@ AiPlayerbot.EnableRandomTeleports = 0
 # donor AhBot thread, per-tick AH/DB scan, or second owner. Interval is 5..3600 seconds
 # (default 120), batch is 1..5 (default 1), and the shared AH try_lock is respected.
 # Requires RandomBotAutologin=1. Failed attempts are rate-limited per bot.
+# ManTech CMaNGOS market uses ahbot.conf and the existing ahbot_items table.
+# 1 selects that controller; 0 selects the optional module market below.
+# Restart after changing controllers. Only one controller can execute.
+AiPlayerbot.AhMarketUseCMaNGOS = 1
+
 AiPlayerbot.AhMarketEnabled = 0
 AiPlayerbot.AhMarketInterval = 120
 AiPlayerbot.AhMarketBatchSize = 1

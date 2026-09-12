@@ -2,6 +2,7 @@
 #include "playerbot/playerbot.h"
 #include "playerbot/PerformanceMonitor.h"
 #include "AhAction.h"
+#include "host/AuctionHouseAdapter.h"
 #include "playerbot/strategy/values/ItemCountValue.h"
 #include "playerbot/RandomItemMgr.h"
 #include "playerbot/strategy/values/BudgetValues.h"
@@ -16,8 +17,7 @@ uint32 AuctionItemCount(AuctionEntry const* auction)
     if (!auction)
         return 0;
 
-    Item* item = sAuctionMgr.GetAItem(auction->itemGuidLow);
-    return item ? item->GetCount() : 0;
+    return auction->itemCount;
 }
 }
 
@@ -177,16 +177,12 @@ bool AhBidAction::ExecuteCommand(Player* requester, std::string text, Unit* auct
         return false;
 
     // Copy entries before scanning; live entries are resolved by id when needed.
-    std::vector<AuctionEntry> map;
-    for (auto const& entry : *auctionHouse->GetAuctions())
-    {
-        if (entry.second)
-            map.push_back(*entry.second);
-    }
+    std::vector<AuctionEntry> map = TortoiseBots::CopyAuctionEntries(*auctionHouse);
 
     if (map.empty())
         return false;
 
+    AuctionEntry selectedAuction;
     AuctionEntry* auction = nullptr;
 
     std::vector<std::pair<uint32, uint32>> auctionPowers;
@@ -222,7 +218,7 @@ bool AhBidAction::ExecuteCommand(Player* requester, std::string text, Unit* auct
             if (std::find_if(auctionPowers.begin(), auctionPowers.end(), [auctionId](std::pair<uint32, uint32> i){return i.first == auctionId;}) != auctionPowers.end())
                 continue;
 
-            auction = auctionHouse->GetAuction(auctionId);
+            auction = TortoiseBots::CopyAuctionEntry(*auctionHouse, auctionId, selectedAuction);
 
             if (!auction)
                 continue;
@@ -286,7 +282,7 @@ bool AhBidAction::ExecuteCommand(Player* requester, std::string text, Unit* auct
 
         for (auto auctionPower : auctionPowers)
         {
-            auction = auctionHouse->GetAuction(auctionPower.first);
+            auction = TortoiseBots::CopyAuctionEntry(*auctionHouse, auctionPower.first, selectedAuction);
 
             if (!auction)
                 continue;
@@ -394,7 +390,7 @@ bool AhBidAction::ExecuteCommand(Player* requester, std::string text, Unit* auct
 
     std::sort(auctionPowers.begin(), auctionPowers.end(), [](std::pair<uint32, uint32> i, std::pair<uint32, uint32> j) {return i > j; });
 
-    auction = auctionHouse->GetAuction(auctionPowers.begin()->first);
+    auction = TortoiseBots::CopyAuctionEntry(*auctionHouse, auctionPowers.begin()->first, selectedAuction);
 
     if (!auction)
         return false;
@@ -416,7 +412,10 @@ bool AhBidAction::BidItem(Player* requester, AuctionEntry* auction, uint32 price
     if (!auctionHouse)
         return false;
 
-    auction = auctionHouse->GetAuction(auction->Id);
+    if (!auction)
+        return false;
+    AuctionEntry currentAuction;
+    auction = TortoiseBots::CopyAuctionEntry(*auctionHouse, auction->Id, currentAuction);
 
     if (!auction)
         return false;
@@ -473,29 +472,29 @@ bool AhCancelAction::ExecuteCommand(Player* requester, std::string text, Unit* a
         targetAuctionId = std::stoul(text);
     }
 
-    std::vector<AuctionEntry*> toCancel;
-    for (auto const& pair : *auctionHouse->GetAuctions())
+    std::vector<AuctionEntry> toCancel;
+    for (auto const& snapshot : TortoiseBots::CopyAuctionEntries(*auctionHouse))
     {
-        AuctionEntry* entry = pair.second;
-        if (!entry || entry->owner != bot->GetGUIDLow())
+        AuctionEntry const* entry = &snapshot;
+        if (entry->owner != bot->GetGUIDLow())
             continue;
 
         if (targetAuctionId && entry->Id == targetAuctionId)
         {
-            toCancel.push_back(entry);
+            toCancel.push_back(*entry);
             break;
         }
 
         if (cancelAll)
         {
-            toCancel.push_back(entry);
+            toCancel.push_back(*entry);
             continue;
         }
 
         ItemPrototype const* proto = sObjectMgr.GetItemPrototype(entry->itemTemplate);
         if (proto && !proto->Name1.empty() && strstri(proto->Name1, text.c_str()))
         {
-            toCancel.push_back(entry);
+            toCancel.push_back(*entry);
         }
     }
 
@@ -506,9 +505,9 @@ bool AhCancelAction::ExecuteCommand(Player* requester, std::string text, Unit* a
     }
 
     bool anyCancelled = false;
-    for (auto* entry : toCancel)
+    for (auto& entry : toCancel)
     {
-        if (CancelAuctionEntry(requester, entry, auctioneer))
+        if (CancelAuctionEntry(requester, &entry, auctioneer))
             anyCancelled = true;
     }
 

@@ -1,17 +1,12 @@
 #pragma once
-
 #include "ScriptObjects.h"
-
 namespace TortoiseBots {
-
-// Native AllCommandScript adapter. It keeps the public `.bot` surface in the
-// module without adding a bot-specific branch to core ChatHandler code.
-class BotChatAdapter final : public AllCommandScript
+// Native command registration retains security, console/SOAP authorization,
+// RBAC and normal dispatch. No pre-authorization interception is needed.
+class BotChatAdapter final : public CommandScript
 {
 public:
     BotChatAdapter();
-
-    bool CanExecuteCommand(ChatHandler* handler, char const* command, char const* args) override;
+    std::vector<ChatCommand> GetCommands() const override;
 };
-
-} // namespace TortoiseBots
+}

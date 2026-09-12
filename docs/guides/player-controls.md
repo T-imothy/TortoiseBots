@@ -143,3 +143,19 @@ Manage and monitor the autonomous synthetic Auction House engine in real time:
 | `.bot ah item` | `<id>` | Checks current blacklist status or active price overrides for an item ID. |
 | `.bot ah item` | `<id> reset` | Removes any custom price override for an item ID, restoring formula pricing. |
 | `.bot ah item` | `<id> <value> [chance] [min] [max]` | Sets custom price (copper), posting chance (%), and stack bounds. Passing `0 0` **blacklists** the item from being posted. |
+
+## ManTech CMaNGOS auction commands
+
+With `AiPlayerbot.AhMarketUseCMaNGOS = 1`, both `.ahbot` and `.bot ah` retain
+the CMaNGOS command service: `status [all]`, `reload`, `rebuild [all]`,
+and `item <id> [reset|<value> <chance> <min> <max>]`. Use `help` for syntax.
+The existing module administrator gate applies before either controller runs.
+Rebuilds coalesce and preserve existing bids by default; reload and override
+edits are rejected while accepted work is active. Console/SOAP calls continue
+through the native command security layer.
+
+ManTech permission detail: `.ahbot` and `.bot ah` require the core's
+`SEC_ADMINISTRATOR` by default, with native RBAC/command overrides respected, including authenticated SOAP callers without
+a live Player. Ordinary bot commands remain available at player rank subject
+to the module's existing ownership checks. Native command registration handles
+RBAC, console eligibility and command dispatch before handlers run.

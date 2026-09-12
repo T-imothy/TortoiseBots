@@ -180,6 +180,7 @@ void RandomBotService::LoadCandidates()
     m_randomizeAgeMs.clear();
     m_rndBotAccountIds.clear();
     m_nextCandidate = 0;
+    m_nextMaintenance = 0;
 
     std::set<uint32> accountIds;
     std::unique_ptr<QueryResult> accounts(LoginDatabase.PQuery("SELECT id FROM account WHERE username LIKE '%s%%'",
@@ -937,6 +938,75 @@ void RandomBotService::MaintainOnlinePool()
     }
 }
 
+void RandomBotService::UpdateMaintenance(uint32_t elapsed)
+{
+    // Keep cheap elapsed-time accounting independent of the work budget so
+    // a deferred bot does not lose strategy/randomization time.
+    for (size_t i = 0; i < m_candidates.size(); ++i)
+    {
+        auto* record = BotManager::Instance().FindBot(m_candidates[i].characterGuid);
+        if (!record || !record->enteredWorld || record->lifecycle != BotLifecycle::InWorld || !sObjectAccessor.FindPlayer(m_candidates[i].characterGuid)) continue;
+        m_strategyAgeMs[i] += elapsed;
+        m_randomizeAgeMs[i] += elapsed;
+    }
+    if (m_candidates.empty()) return;
+    uint32 const started = WorldTimer::getMSTime();
+    size_t const limit = std::min<size_t>(m_candidates.size(), sPlayerbotAIConfig.randomBotMaintenanceBatch);
+    for (size_t examined = 0; examined < limit; ++examined)
+    {
+        // At least one candidate advances on every pass. A single action is
+        // not preemptible, but subsequent work respects the elapsed budget.
+        if (examined && WorldTimer::getMSTimeDiff(started, WorldTimer::getMSTime()) >=
+            sPlayerbotAIConfig.randomBotMaintenanceBudgetMs) break;
+        size_t const i = m_nextMaintenance++ % m_candidates.size();
+        if (m_nextMaintenance >= m_candidates.size()) m_nextMaintenance = 0;
+        Candidate const& candidate = m_candidates[i];
+        BotRecord* record = BotManager::Instance().FindBot(candidate.characterGuid);
+        Player* player = sObjectAccessor.FindPlayer(candidate.characterGuid);
+        if (!record || !record->enteredWorld || record->lifecycle != BotLifecycle::InWorld || !player)
+            continue;
+
+        // Recovery/expired-value work stays on the world thread and is bounded
+        // by the configured service cadence rather than a second AI loop.
+        sRandomBotFacade.ProcessBot(player);
+        // Recovery may change lifecycle/map ownership. Resolve again before
+        // using the Player or record for later maintenance in this slice.
+        record = BotManager::Instance().FindBot(candidate.characterGuid);
+        player = sObjectAccessor.FindPlayer(candidate.characterGuid);
+        if (!record || !record->enteredWorld || record->lifecycle != BotLifecycle::InWorld || !player) continue;
+
+        uint32 strategyInterval = sPlayerbotAIConfig.minRandomBotChangeStrategyTime;
+        if (sPlayerbotAIConfig.maxRandomBotChangeStrategyTime > strategyInterval)
+            strategyInterval = urand(strategyInterval, sPlayerbotAIConfig.maxRandomBotChangeStrategyTime);
+        if (strategyInterval && m_strategyAgeMs[i] >= strategyInterval * 1000)
+        {
+            sRandomBotFacade.ChangeStrategy(player);
+            m_strategyAgeMs[i] = 0;
+        }
+
+        uint32 randomizeInterval = sPlayerbotAIConfig.minRandomBotRandomizeTime;
+        if (sPlayerbotAIConfig.maxRandomBotRandomizeTime > randomizeInterval)
+            randomizeInterval = urand(randomizeInterval, sPlayerbotAIConfig.maxRandomBotRandomizeTime);
+        if (sPlayerbotAIConfig.randomGearUpgradeEnabled && randomizeInterval &&
+            m_randomizeAgeMs[i] >= randomizeInterval * 1000)
+        {
+            // Same fresh-bot-only rule as login seeding (GearSeedingGuard.h):
+            // never overwrite earned gear on a timer tick. The login path
+            // normally seeds first; this is a backstop for pool bots that
+            // somehow entered the world unseeded.
+            uint32 timerGuidLow = player->GetGUIDLow();
+            bool freshTimerBot = TortoiseBots::NeedsInitialGearSeeding(
+                player->GetTotalPlayedTime(), sRandomBotFacade.GetValue(timerGuidLow, "seeded"));
+            if (player->GetLevel() >= 5 && freshTimerBot)
+            {
+                sRandomBotFacade.UpdateGearSpells(player);
+                sRandomBotFacade.SetValue(timerGuidLow, "seeded", 1);
+            }
+            m_randomizeAgeMs[i] = 0;
+        }
+    }
+}
+
 void RandomBotService::Update(uint32_t diff)
 {
     if (!m_initialized || !sPlayerbotAIConfig.enabled)
@@ -969,50 +1039,7 @@ void RandomBotService::Update(uint32_t diff)
         ResolvePinnedBots();
     RemoveExpiredBots(elapsed);
 
-    for (size_t i = 0; i < m_candidates.size(); ++i)
-    {
-        Candidate const& candidate = m_candidates[i];
-        BotRecord* record = BotManager::Instance().FindBot(candidate.characterGuid);
-        Player* player = sObjectAccessor.FindPlayer(candidate.characterGuid);
-        if (!record || !record->enteredWorld || !player)
-            continue;
-
-        // Recovery/expired-value work stays on the world thread and is bounded
-        // by the configured service cadence rather than a second AI loop.
-        sRandomBotFacade.ProcessBot(player);
-
-        m_strategyAgeMs[i] += elapsed;
-        uint32 strategyInterval = sPlayerbotAIConfig.minRandomBotChangeStrategyTime;
-        if (sPlayerbotAIConfig.maxRandomBotChangeStrategyTime > strategyInterval)
-            strategyInterval = urand(strategyInterval, sPlayerbotAIConfig.maxRandomBotChangeStrategyTime);
-        if (strategyInterval && m_strategyAgeMs[i] >= strategyInterval * 1000)
-        {
-            sRandomBotFacade.ChangeStrategy(player);
-            m_strategyAgeMs[i] = 0;
-        }
-
-        m_randomizeAgeMs[i] += elapsed;
-        uint32 randomizeInterval = sPlayerbotAIConfig.minRandomBotRandomizeTime;
-        if (sPlayerbotAIConfig.maxRandomBotRandomizeTime > randomizeInterval)
-            randomizeInterval = urand(randomizeInterval, sPlayerbotAIConfig.maxRandomBotRandomizeTime);
-        if (sPlayerbotAIConfig.randomGearUpgradeEnabled && randomizeInterval &&
-            m_randomizeAgeMs[i] >= randomizeInterval * 1000)
-        {
-            // Same fresh-bot-only rule as login seeding (GearSeedingGuard.h):
-            // never overwrite earned gear on a timer tick. The login path
-            // normally seeds first; this is a backstop for pool bots that
-            // somehow entered the world unseeded.
-            uint32 timerGuidLow = player->GetGUIDLow();
-            bool freshTimerBot = TortoiseBots::NeedsInitialGearSeeding(
-                player->GetTotalPlayedTime(), sRandomBotFacade.GetValue(timerGuidLow, "seeded"));
-            if (player->GetLevel() >= 5 && freshTimerBot)
-            {
-                sRandomBotFacade.UpdateGearSpells(player);
-                sRandomBotFacade.SetValue(timerGuidLow, "seeded", 1);
-            }
-            m_randomizeAgeMs[i] = 0;
-        }
-    }
+    UpdateMaintenance(elapsed);
 
     MaintainOnlinePool();
 }

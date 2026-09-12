@@ -196,3 +196,11 @@ normal player run/walk speeds and capped vertical launch speed. It rejects
 casting, transport, water/flying/falling, rooted/dead and preparation states.
 A landing must be walkable and leave a route making objective progress. Failed
 requests are backed off and never converted to a direct ground spline.
+
+
+Random-population recovery/strategy/gear maintenance now rotates fairly through
+a bounded candidate slice instead of running expensive work for every bot in a
+single cadence. Deferred bots keep elapsed timers. Recovery resolves the player
+and module record again before subsequent work, because recovery can change
+lifecycle state. Light pool accounting and timed logout are separate from this
+expensive-work limit; measured runtime latency remains an acceptance gate.

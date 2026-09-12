@@ -127,3 +127,14 @@ is not implemented. No movement-speed override is introduced by this port.
 It delays repeated failed requests for the same destination cell, map, instance
 and 64-bit transition generation. A changed destination/transfer or successful
 path clears that failure. The delay does not alter physical movement speed.
+
+### Bounded random population maintenance
+
+`AiPlayerbot.RandomBotMaintenanceBatch` defaults to 128 candidates per service
+cadence and clamps to 1–4096. `AiPlayerbot.RandomBotMaintenanceBudgetMs` defaults
+to 2 ms and clamps to 1–1000. Recovery, strategy and gear work rotate through the
+pool under both limits; at least one candidate advances per pass. An individual
+action cannot be preempted, so this is a soft time bound. Cheap elapsed accounting
+still scans the pool so deferred bots retain strategy/randomization timers.
+Admission retains its separate existing limit. These limits do not certify
+6,000 live bots or complete the parallel AI scheduling migration.

@@ -1552,3 +1552,11 @@ Scheduler trait intent comes from baseline PlayerbotScripts; human proximity
 was corrected independently after tracing RandomBotFacade's bot-only roster.
 ModuleHumanInterestTest covers humans versus bots, instance/camera visibility,
 master/group responsiveness and network takeover.
+
+
+Bounded population maintenance is independently adapted from the ManTech
+requirement to limit world-owner maintenance without losing elapsed time or
+starving a cohort. It retains this module's native RandomBotService and recovery
+actions. ModulePopulationMaintenanceTest executes the selected implementation
+with 6,000 fixtures, time/count budgets, fair wraparound, deferred timers and
+removal during recovery. Fixture scale is not a live performance measurement.

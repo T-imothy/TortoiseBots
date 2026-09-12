@@ -40,6 +40,7 @@ private:
 
     void LoadCandidates();
     void MaintainOnlinePool();
+    void UpdateMaintenance(uint32_t elapsed);
     void RemoveExpiredBots(uint32_t diff);
     uint32_t TargetCount() const;
     uint32_t DesiredTargetCount() const;
@@ -57,6 +58,7 @@ private:
     std::vector<uint32_t> m_strategyAgeMs;
     std::vector<uint32_t> m_randomizeAgeMs;
     size_t m_nextCandidate = 0;
+    size_t m_nextMaintenance = 0;
     uint32_t m_serviceElapsedMs = 0;
     // Stable target: snapshot of DesiredTargetCount once at Initialize when
     // auto-create is enabled (no per-cadence re-roll/ratchet toward Max). For

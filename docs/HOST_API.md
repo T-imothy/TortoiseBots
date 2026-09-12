@@ -539,3 +539,14 @@ This restores map/player scheduling classification, not parallel AI dispatch.
 AI remains world-owner-driven until shared BotManager records, packet/action
 state and cross-map mutation contracts are adapted. No OnAIUpdate hook has been
 enabled prematurely, and no global lock is presented as performance parity.
+
+### Native network reclaim notification
+
+The ManTech core now emits the existing PlayerScript::OnReleaseToClient hook
+after headless reclaim preconditions pass and before replacing/deleting the old
+session. BotPlayerAdapter forwards it to BotManager::ReleaseToClient, which
+unpublishes/destroys module AI and releases module activity leases. The observer
+must not stop/delete the core-owned session; native HeadlessSessionMgr retains
+transfer and deletion ownership. Invalid reclaim attempts emit no notification.
+NativeHeadlessReclaimTest verifies this ordering and rejection boundaries with
+the production reclaim implementation and deterministic session fixtures.

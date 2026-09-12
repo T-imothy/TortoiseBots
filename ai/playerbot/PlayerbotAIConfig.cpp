@@ -263,6 +263,8 @@ bool PlayerbotAIConfig::Initialize()
     randomBotAutologin = config.GetBoolDefault("AiPlayerbot.RandomBotAutologin", false);
     minRandomBots = config.GetIntDefault("AiPlayerbot.MinRandomBots", 0);
     maxRandomBots = config.GetIntDefault("AiPlayerbot.MaxRandomBots", 0);
+    randomBotMaintenanceBatch = uint32(std::max(1, std::min(4096, config.GetIntDefault("AiPlayerbot.RandomBotMaintenanceBatch", 128))));
+    randomBotMaintenanceBudgetMs = uint32(std::max(1, std::min(1000, config.GetIntDefault("AiPlayerbot.RandomBotMaintenanceBudgetMs", 2))));
     randomBotUpdateInterval = config.GetIntDefault("AiPlayerbot.RandomBotUpdateInterval", 1 * 1000);
     randomBotTimedLogout = config.GetBoolDefault("AiPlayerbot.RandomBotTimedLogout", true);
     randomBotTimedOffline = config.GetBoolDefault("AiPlayerbot.RandomBotTimedOffline", false);

@@ -18,6 +18,7 @@ namespace TortoiseBots {
 
 BotPlayerAdapter::BotPlayerAdapter()
     : PlayerScript("tortoisebots_players", {
+        PLAYERHOOK_ON_RELEASE_TO_CLIENT,
         PLAYERHOOK_IS_MACHINE_DRIVEN,
         PLAYERHOOK_IS_UPDATE_CRITICAL,
         PLAYERHOOK_ON_LOGIN,
@@ -25,6 +26,11 @@ BotPlayerAdapter::BotPlayerAdapter()
         PLAYERHOOK_ON_BEFORE_LOGOUT,
         PLAYERHOOK_ON_LOGOUT })
 {
+}
+
+void BotPlayerAdapter::OnReleaseToClient(Player* player)
+{
+    BotManager::Instance().ReleaseToClient(player);
 }
 
 bool BotPlayerAdapter::IsMachineDriven(Player const* player)

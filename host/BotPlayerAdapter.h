@@ -11,6 +11,7 @@ class BotPlayerAdapter final : public PlayerScript
 public:
     BotPlayerAdapter();
 
+    void OnReleaseToClient(Player* player) override;
     bool IsMachineDriven(Player const* player) override;
     bool IsUpdateCritical(Player const* player) override;
     void OnLogin(Player* player) override;

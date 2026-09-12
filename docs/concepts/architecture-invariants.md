@@ -88,3 +88,9 @@ map instance; the random-bot roster is not a human observer list. Classification
 is separate from execution ownership: the module's AI loop still executes on
 the world owner after maps join. Parallel AI dispatch remains pending a shared
 state/lifecycle audit; passing classification tests does not prove concurrency.
+
+
+Network reclaim now releases module control through the existing native
+OnReleaseToClient observer before the original headless session is replaced.
+It no longer relies on a later world-loop scan to detach AI. Core session
+ownership is unchanged; module observers relinquish AI/leases only.

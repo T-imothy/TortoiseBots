@@ -138,6 +138,8 @@ public:
     float attackEmoteChance;
     uint32 minRandomBots, maxRandomBots;
     uint32 randomBotUpdateInterval;
+    uint32 randomBotMaintenanceBatch = 128;
+    uint32 randomBotMaintenanceBudgetMs = 2;
     bool randomBotTimedLogout, randomBotTimedOffline;
     uint32 minRandomBotInWorldTime, maxRandomBotInWorldTime;
     uint32 minRandomBotRandomizeTime, maxRandomBotRandomizeTime;

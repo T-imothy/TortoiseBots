@@ -430,6 +430,7 @@ public:
     float jumpBackwardChance;
     float jumpHeightLimit;
     float jumpVSpeed;
+    uint32 pathFailureRetryMs = 3000;
     float jumpHSpeed;
 
     std::mutex m_logMtx;

@@ -163,3 +163,36 @@ The `AhMarketService` behavior above applies only with
 `AiPlayerbot.AhMarketUseCMaNGOS = 0`; its separate `AhMarketEnabled` switch still
 applies then. The host dispatches only the selected service, and the module
 market also rejects updates while CMaNGOS is selected. Restart to switch controllers.
+
+### ManTech migration travel and Thorn Gorge (2026-09-12)
+
+Thorn Gorge joins the existing battleground demand/queue service. Strategies use
+the native battleground's objective assignment, flag ownership and GO pickup
+validation. Flag delivery has priority over optional enemy pursuit; nearby
+interception/local defense remains available. This behavior is scoped to Thorn.
+
+Long ground travel attempts the existing mount action before starting movement,
+subject to its combat, distance, mount availability and flag-carrier restrictions.
+Failed ground routes remain failed. Native taxi IDs and cached geometry refresh
+on startup; both autonomous/RPG and route taxi actions check the real source
+flightmaster, endpoints, learned routes and native activation result. Failure
+does not consume the leg or temporary fare credit.
+
+Walking links no longer bridge two failed routes just because endpoints are
+near, or fabricate a 20-yard portal/transport approach. A connector must pass
+native pathfinding; portal activation and boarding use their existing actions.
+Route preference is separate from physical movement speed. Stable party route
+variation and the sustained-swim penalty remain in TravelRoutePolicy.
+
+These ports have source/build/regression evidence, not live travel or match
+acceptance. Map-owner AI scheduling and population/lifecycle migration remain
+tracked by the core migration checklist.
+
+
+Generic ground recovery first asks for a usable walk. Only a failed required
+ground route can try the existing collision-checked ballistic jump: at most
+16 direction/speed candidates per attempt, attempts spaced by five seconds,
+normal player run/walk speeds and capped vertical launch speed. It rejects
+casting, transport, water/flying/falling, rooted/dead and preparation states.
+A landing must be walkable and leave a route making objective progress. Failed
+requests are backed off and never converted to a direct ground spline.

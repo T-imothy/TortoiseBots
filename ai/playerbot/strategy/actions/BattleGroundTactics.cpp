@@ -1,3 +1,4 @@
+#include "Battlegrounds/BattleGroundTG.h"
 
 #include "playerbot/playerbot.h"
 #include "playerbot/strategy/values/PositionValue.h"
@@ -2088,7 +2089,8 @@ bool BGTactics::Execute(Event& event)
     BattleGround *bg = bot->GetBattleGround();
     if (!bg)
     {
-        ai->ResetStrategies();
+        Map* map = bot->FindMap();
+        if (!map || !map->IsDungeon()) ai->ResetStrategies();
         return false;
     }
 
@@ -2116,8 +2118,38 @@ bool BGTactics::Execute(Event& event)
     if (bg->GetStatus() == STATUS_IN_PROGRESS && ai->HasStrategy("buff", BotState::BOT_STATE_NON_COMBAT))
         ai->ChangeStrategy("-buff", BotState::BOT_STATE_NON_COMBAT);
 
-    std::vector<BattleBotPath*> const* vPaths;
-    std::vector<uint32> const* vFlagIds;
+    if (bg->GetTypeId() == BATTLEGROUND_TG)
+    {
+        // Query while this bot has the gameplay owner; world AI currently runs after maps join. Reuse movement
+        // and GO interaction; the battleground owns capture/flag validation.
+        auto* thorn = static_cast<BattleGroundTG*>(bg);
+        if (bg->GetStatus() != STATUS_IN_PROGRESS || bot->IsDead()) return false;
+        if (bot->IsNonMeleeSpellCasted(false)) return false;
+        if (getName() == "check flag")
+        {
+            GameObject* flag = bot->GetMap()->GetGameObject(thorn->GetAvailableFlag());
+            if (!flag || !flag->isSpawned() || !bot->IsWithinDistInMap(flag, 5.0f) ||
+                !bot->IsWithinLOSInMap(flag)) return false;
+            if (bot->IsMounted()) bot->RemoveSpellsCausingAura(SPELL_AURA_MOUNTED);
+            bot->StopMoving();
+            flag->Use(bot);
+            return bot->IsNonMeleeSpellCasted(false);
+        }
+        if (getName() == "move to objective" || getName() == "select objective")
+        {
+            float x, y, z;
+            if (!thorn->GetObjective(bot, x, y, z)) return false;
+            // Keep the native objective value current for movement/jump consumers.
+            PositionMap& positions = context->GetValue<PositionMap&>("position")->Get();
+            positions["bg objective"].Set(x, y, z, bot->GetMapId());
+            if (bot->IsWithinDist3d(x, y, z, 3.0f)) return false;
+            return MoveTo(bot->GetMapId(), x, y, z);
+        }
+        return false;
+    }
+
+    std::vector<BattleBotPath*> const* vPaths = nullptr;
+    std::vector<uint32> const* vFlagIds = nullptr;
 
     BattleGroundTypeId bgType = bg->GetTypeID();
 
@@ -2171,6 +2203,8 @@ bool BGTactics::Execute(Event& event)
         if (bg->GetStatus() == STATUS_WAIT_JOIN)
             return false;
 
+        if (!vPaths) return false;
+
         if (useBuff())
             return true;
 
@@ -2209,7 +2243,7 @@ bool BGTactics::Execute(Event& event)
             case BATTLEGROUND_AV: return CheckFlagAv();
         }
 
-        if (vFlagIds)
+        if (vPaths && vFlagIds)
         {
             if (atFlag(*vPaths, *vFlagIds))
                 return true;

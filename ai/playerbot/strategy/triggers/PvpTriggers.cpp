@@ -1,3 +1,4 @@
+#include "Battlegrounds/BattleGroundTG.h"
 
 #include "playerbot/playerbot.h"
 #include "PvpTriggers.h"
@@ -226,3 +227,46 @@ bool PlayerWantsInBattlegroundTrigger::IsActive()
 
     return true;
 };
+
+#ifdef MANGOSBOT_ZERO
+bool ThornFlagDelivery::IsActive()
+{
+    BattleGround* bg = bot->GetBattleGround();
+    if (!bg || bg->GetTypeId() != BATTLEGROUND_TG ||
+        bg->GetStatus() != STATUS_IN_PROGRESS ||
+        bg->GetFlagCarrierGuid() != bot->GetObjectGuid() ||
+        !bot->HasAura(59005) || bot->IsNonMeleeSpellCasted(false)) return false;
+    float x = 0, y = 0, z = 0;
+    return static_cast<BattleGroundTG*>(bg)->GetObjective(bot, x, y, z) &&
+        !bot->IsWithinDist3d(x, y, z, 3.0f);
+}
+bool ThornObjectiveTravel::IsActive()
+{
+    BattleGround* bg = bot->GetBattleGround();
+    if (!bg || bg->GetTypeId() != BATTLEGROUND_TG || bg->GetStatus() != STATUS_IN_PROGRESS ||
+        bg->GetFlagCarrierGuid() == bot->GetObjectGuid() || bot->IsNonMeleeSpellCasted(false)) return false;
+    float x=0, y=0, z=0;
+    if (!static_cast<BattleGroundTG*>(bg)->GetObjective(bot,x,y,z) ||
+        bot->IsWithinDist3d(x,y,z,20.0f)) return false;
+    // Fight nearby opponents around the assignment. Once a chase has taken us
+    // more than 45 yards away, resume the assignment; survival still outranks us.
+    Unit* victim = bot->GetVictim();
+    if (!victim) victim = AI_VALUE(Unit*, "enemy player target");
+    if (victim && bot->IsWithinDistInMap(victim,12.0f) && bot->IsWithinLOSInMap(victim) &&
+        bot->IsWithinDist3d(x,y,z,45.0f)) return false;
+    return true;
+}
+bool ThornCarrierIntercept::IsActive()
+{
+    BattleGround* bg = bot->GetBattleGround();
+    if (!bg || bg->GetTypeId() != BATTLEGROUND_TG || bg->GetStatus() != STATUS_IN_PROGRESS ||
+        bg->GetFlagCarrierGuid() == bot->GetObjectGuid() || bot->IsNonMeleeSpellCasted(false)) return false;
+    Unit* carrier = AI_VALUE(Unit*, "enemy flag carrier");
+    if (!carrier || !bot->IsWithinDistInMap(carrier, 35.0f)) return false;
+    float x=0, y=0, z=0;
+    // Interceptors are assigned to the carrier; other roles defend their nearby
+    // objective instead of following the carrier away indefinitely.
+    return static_cast<BattleGroundTG*>(bg)->GetObjective(bot,x,y,z) &&
+        carrier->IsWithinDist3d(x,y,z,45.0f);
+}
+#endif

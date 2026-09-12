@@ -5365,12 +5365,16 @@ bool PlayerbotAI::HasPlayerNearby(WorldPosition pos, float range)
 
     float sqRange = range * range;
     bool nearPlayer = false;
-    for (auto& i : sRandomBotFacade.GetPlayers())
+    Map* map = bot && bot->IsInWorld() ? bot->GetMap() : nullptr;
+    if (!map || pos.GetMapId() != map->GetId()) return false;
+    // The random facade enumerates bots, not human observers. Resolve the
+    // owning map's current players and require a live network transport.
+    // The map reference also prevents same-map-ID instances seeing each other.
+    for (auto const& ref : map->GetPlayers())
     {
-        // The facade map is only re-synced periodically; entries can outlive
-        // their Player under bot churn, so resolve by GUID before any deref.
-        Player* player = sObjectAccessor.FindPlayer(ObjectGuid(HIGHGUID_PLAYER, i.first));
-        if (!player || !player->IsInWorld())
+        Player* player = ref.getSource();
+        if (!player || !player->IsInWorld() || player->GetMap() != map ||
+            !player->GetSession() || !player->GetSession()->HasNetworkTransport())
             continue;
 
         if (!player->IsGameMaster() || player->IsGMVisible())

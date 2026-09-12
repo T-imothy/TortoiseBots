@@ -124,3 +124,22 @@ void ArathiStrategy::InitCombatTriggers(std::list<TriggerNode*>& triggers)
 {
     InitNonCombatTriggers(triggers);
 }
+
+#ifdef MANGOSBOT_ZERO
+void ThornGorgeStrategy::InitNonCombatTriggers(std::list<TriggerNode*>& triggers)
+{
+    // Above proactive PvP attack (90), below critical survival (100+).
+    // Only a TG carrier with a current objective assignment qualifies.
+    triggers.push_back(new TriggerNode("thorn flag delivery",
+        NextAction::array(0, new NextAction("bg move to objective", ACTION_EMERGENCY + 5.0f), NULL)));
+    triggers.push_back(new TriggerNode("thorn objective travel",
+        NextAction::array(0, new NextAction("bg move to objective", ACTION_EMERGENCY + 2.0f), NULL)));
+    triggers.push_back(new TriggerNode("thorn carrier intercept",
+        NextAction::array(0, new NextAction("attack enemy flag carrier", ACTION_EMERGENCY + 3.0f), NULL)));
+}
+
+void ThornGorgeStrategy::InitCombatTriggers(std::list<TriggerNode*>& triggers)
+{
+    InitNonCombatTriggers(triggers);
+}
+#endif

@@ -24,6 +24,9 @@ namespace ai
             lastPath = other.lastPath;
             lastMoveShort = other.lastMoveShort;
             nextTeleport = other.nextTeleport;
+            failedPathMap = other.failedPathMap; failedPathInstance = other.failedPathInstance;
+            failedPathCellX = other.failedPathCellX; failedPathCellY = other.failedPathCellY; failedPathCellZ = other.failedPathCellZ;
+            failedPathGeneration = other.failedPathGeneration; failedPathRetryUntil = other.failedPathRetryUntil;
             fleeCount = other.fleeCount;
             lastFleeAttempt = other.lastFleeAttempt;
             moveEvent = Event();
@@ -40,9 +43,16 @@ namespace ai
             lastFleeAttempt = 0;
             lastMoveShort = WorldPosition();
             nextTeleport = 0;
+            clearPathFailure();
             moveEvent = Event();
         }
 
+        void clearPathFailure()
+        {
+            failedPathMap = UINT32_MAX; failedPathInstance = 0;
+            failedPathCellX = failedPathCellY = failedPathCellZ = 0;
+            failedPathGeneration = 0; failedPathRetryUntil = 0;
+        }
         void Set(Unit* lastFollow)
         {
             setPath(TravelPath());
@@ -66,6 +76,10 @@ namespace ai
         TravelPath lastPath;
         WorldPosition lastMoveShort;
         time_t nextTeleport;
+        uint32 failedPathMap = UINT32_MAX, failedPathInstance = 0;
+        int32 failedPathCellX = 0, failedPathCellY = 0, failedPathCellZ = 0;
+        uint64_t failedPathGeneration = 0;
+        uint32 failedPathRetryUntil = 0;
         Event moveEvent;
     };
 

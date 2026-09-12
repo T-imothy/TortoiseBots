@@ -1,3 +1,4 @@
+#include "Battlegrounds/BattleGroundTG.h"
 
 #include "playerbot/playerbot.h"
 #include "PvpValues.h"
@@ -161,6 +162,17 @@ Unit* FlagCarrierValue::Calculate()
 
     if (ai->GetBot()->InBattleGround())
     {
+        if (bot->GetBattleGroundTypeId() == BATTLEGROUND_TG)
+        {
+            BattleGround* bg = bot->GetBattleGround();
+            if (!bg || bg->GetStatus() != STATUS_IN_PROGRESS || bg->GetFlagCarrierGuid().IsEmpty())
+                return nullptr;
+            Player* fc = bg->GetBgMap()->GetPlayer(bg->GetFlagCarrierGuid());
+            if (!fc || !fc->IsInWorld() || !fc->IsAlive() || fc->GetBattleGround() != bg ||
+                !fc->HasAura(59005) || ((fc->GetBGTeam() == bot->GetBGTeam()) != sameTeam))
+                return nullptr;
+            return (ignoreRange || bot->IsWithinDistInMap(fc, sPlayerbotAIConfig.sightDistance)) ? fc : nullptr;
+        }
         if (ai->GetBot()->GetBattleGroundTypeId() == BattleGroundTypeId::BATTLEGROUND_WS)
         {
             BattleGroundWS *bg = (BattleGroundWS*)ai->GetBot()->GetBattleGround();

@@ -108,6 +108,7 @@ namespace ai
             creators["close"] = [](PlayerbotAI* ai) { return new MeleeCombatStrategy(ai); };
             creators["ranged"] = [](PlayerbotAI* ai) { return new RangedCombatStrategy(ai); };
             creators["behind"] = [](PlayerbotAI* ai) { return new SetBehindCombatStrategy(ai); };
+            creators["thorn gorge"] = [](PlayerbotAI* ai) { return new ThornGorgeStrategy(ai); };
             creators["battleground"] = [](PlayerbotAI* ai) { return new BattlegroundStrategy(ai); };
             creators["warsong"] = [](PlayerbotAI* ai) { return new WarsongStrategy(ai); };
             creators["alterac"] = [](PlayerbotAI* ai) { return new AlteracStrategy(ai); };

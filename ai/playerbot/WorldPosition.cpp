@@ -960,7 +960,7 @@ std::vector<WorldPosition> WorldPosition::getPathStepFrom(const WorldPosition& s
 
     std::vector<WorldPosition> retvec = fromPointsArray(points);
 
-    if (type == PATHFIND_INCOMPLETE)
+    if (type == PATHFIND_INCOMPLETE && !retvec.empty())
     {
         WorldPosition lastPoint = retvec.back();
 
@@ -988,7 +988,9 @@ std::vector<WorldPosition> WorldPosition::getPathStepFrom(const WorldPosition& s
 
 std::vector<WorldPosition> WorldPosition::getPathStepFrom(const WorldPosition& startPos, const Unit* bot, bool forceNormalPath) const
 {
-    std::unique_ptr<PathFinder> pathfinder = std::make_unique<PathFinder>(bot);
+    std::unique_ptr<PathFinder> pathfinder = bot && bot->GetMapId() == startPos.GetMapId()
+        ? std::make_unique<PathFinder>(bot)
+        : std::make_unique<PathFinder>(startPos.GetMapId(), 0);
     return getPathStepFrom(startPos, pathfinder, bot, forceNormalPath);
 }
 
@@ -1035,6 +1037,7 @@ bool WorldPosition::cropPathTo(std::vector<WorldPosition>& path, const float max
 //A sequential series of pathfinding attempts. Returns the complete path and if the patfinder eventually found a way to the destination.
 std::vector<WorldPosition> WorldPosition::getPathFromPath(const std::vector<WorldPosition>& startPath, const Unit* bot, uint8 maxAttempt) const
 {
+    if (startPath.empty()) return {};
     //We start at the end of the last path.
     WorldPosition currentPos = startPath.back();
 
@@ -1059,11 +1062,7 @@ std::vector<WorldPosition> WorldPosition::getPathFromPath(const std::vector<Worl
     if (bot && instanceId == bot->GetInstanceId())
         pathfinder = std::make_unique<PathFinder>(bot);
     else
-    {
-        if (!bot)
-            return {};
-        pathfinder = std::make_unique<PathFinder>(bot);
-    }
+        pathfinder = std::make_unique<PathFinder>(getMapId(), instanceId);
 
     //Limit the pathfinding attempts
     for (uint32 i = 0; i < maxAttempt; i++)
@@ -1086,7 +1085,8 @@ std::vector<WorldPosition> WorldPosition::getPathFromPath(const std::vector<Worl
         currentPos = subPath.back();
     }
 
-    return fullPath;
+    // A lone origin is not progress after a failed path query.
+    return fullPath.size() > 1 ? fullPath : std::vector<WorldPosition>{};
 }
 
 bool WorldPosition::ClosestCorrectPoint(float maxRange, float maxHeight, uint32 instanceId)
@@ -1099,11 +1099,11 @@ bool WorldPosition::ClosestCorrectPoint(float maxRange, float maxHeight, uint32 
 
     dtNavMeshQuery const* query = mmap->GetNavMeshQuery(getMapId());
 
-    MANGOS_ASSERT(query && query->getAttachedNavMesh());
+    if (!query || !query->getAttachedNavMesh()) return false;
 
     float curPoint[VERTEX_SIZE] = {y, z, x };
     float extend[VERTEX_SIZE] = { maxRange, maxHeight, maxRange };
-    float newPoint[VERTEX_SIZE];
+    float newPoint[VERTEX_SIZE] = {};
 
     dtQueryFilter filter;
     dtPolyRef polyRef = INVALID_POLYREF;
@@ -1120,11 +1120,15 @@ bool WorldPosition::ClosestCorrectPoint(float maxRange, float maxHeight, uint32 
 
     dtStatus dtResult = query->findNearestPoly(curPoint, extend, &filter, &polyRef, newPoint);
 
+    if (!dtStatusSucceed(dtResult) || polyRef == INVALID_POLYREF ||
+        !std::isfinite(newPoint[0]) || !std::isfinite(newPoint[1]) || !std::isfinite(newPoint[2]))
+        return false;
+
     y = newPoint[0];
     z = newPoint[1];
     x = newPoint[2];
 
-    return dtStatusSucceed(dtResult) && polyRef != INVALID_POLYREF;
+    return true;
 }
 
 bool WorldPosition::GetReachableRandomPointOnGround(const Player* bot, const float radius, const bool randomRange)

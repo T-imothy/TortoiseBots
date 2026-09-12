@@ -1,3 +1,4 @@
+#include "MovementActions.h"
 
 #include "playerbot/playerbot.h"
 #include "RpgSubActions.h"
@@ -161,13 +162,13 @@ bool RpgTaxiAction::Execute(Event& event)
 
     ai->Unmount();
 
-    uint32 node = sObjectMgr.GetNearestTaxiNode(guidP.getX(), guidP.getY(), guidP.getZ(), guidP.GetMapId(), bot->GetTeam());
+    uint32 node = sObjectMgr.GetNearestTaxiNode(guidP.getX(), guidP.getY(), guidP.getZ(), guidP.getMapId(), bot->GetTeam());
 
     std::vector<uint32> nodes;
     for (uint32 i = 0; i < sTaxiPathStore.GetNumRows(); ++i)
     {
         TaxiPathEntry const* entry = sTaxiPathStore.LookupEntry(i);
-        if (entry && entry->from == node && (bot->GetTaxi().IsTaximaskNodeKnown(entry->to) || bot->IsTaxiCheater()))
+        if (entry && entry->from == node && (bot->GetTaxi().IsTaximaskNodeKnown(entry->to) || bot->isTaxiCheater()))
         {
             // Only destinations usable by the bot's own faction. Previously
             // the sole check was whether the flight point is KNOWN - but with
@@ -195,41 +196,36 @@ bool RpgTaxiAction::Execute(Event& event)
 
     uint32 path = nodes[urand(0, nodes.size() - 1)];
     uint32 money = bot->GetMoney();
-    bot->SetMoney(money + 100000);
 
     TaxiPathEntry const* entry = sTaxiPathStore.LookupEntry(path);
     if (!entry)
-    {
-        bot->SetMoney(money);
         return false;
-    }
 
     TaxiNodesEntry const* nodeFrom = sTaxiNodesStore.LookupEntry(entry->from);
     TaxiNodesEntry const* nodeTo = sTaxiNodesStore.LookupEntry(entry->to);
     if (!nodeFrom || !nodeTo)
-    {
-        bot->SetMoney(money);
         return false;
-    }
 
     Creature* flightMaster = bot->GetNPCIfCanInteractWith(guidP, UNIT_NPC_FLAG_FLIGHTMASTER);
     if (!flightMaster)
     {
         sLog.outError("Bot %s cannot talk to flightmaster (%zu location available)", bot->GetName(), nodes.size());
-        bot->SetMoney(money);
         return false;
     }
-    if (!bot->ActivateTaxiPathTo({ entry->from, entry->to }, flightMaster, 0))
+    // Keep the existing ambient free-flight policy, but use the SAME native
+    // eligibility/discovery adapter as purposeful travel. Restore funds on
+    // rejection too; the former early return leaked the temporary credit.
+    bot->SetMoney(uint32(std::min<uint64>(uint64(money) + entry->price, UINT32_MAX)));
+    bool const activated = MovementAction::UseTaxi(ai, path, true, flightMaster);
+    bot->SetMoney(money);
+    if (!activated)
     {
         sLog.outError("Bot %s cannot fly %u (%zu location available)", bot->GetName(), path, nodes.size());
-        bot->SetMoney(money);
         return false;
     }
 
 
-    sLog.outDetail("Bot #%d <%s> is flying from %s to %s (%zu location available)", bot->GetGUIDLow(), bot->GetName(), nodeFrom->name[LOCALE_enUS], nodeTo->name[LOCALE_enUS], nodes.size());
-    bot->SetMoney(money);
-
+    sLog.outDetail("Bot #%d <%s> is flying from %s to %s (%zu location available)", bot->GetGUIDLow(), bot->GetName(), nodeFrom->name[0], nodeTo->name[0], nodes.size());
     rpg->AfterExecute();
 
     DoDelay();

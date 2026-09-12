@@ -74,7 +74,7 @@ std::vector<HumanBgDemand> GetHumanBgDemands()
     {
         BattleGroundQueueTypeId queueType = BattleGroundQueueTypeId(queueIndex);
         BattleGroundTypeId bgType = sServerFacade.BGTemplateId(queueType);
-        if (bgType != BATTLEGROUND_WS && bgType != BATTLEGROUND_AB && bgType != BATTLEGROUND_AV)
+        if (bgType != BATTLEGROUND_WS && bgType != BATTLEGROUND_AB && bgType != BATTLEGROUND_AV && bgType != BATTLEGROUND_TG)
             continue;
 
         if (!sBattleGroundMgr.GetBattleGroundTemplate(bgType))
@@ -133,7 +133,7 @@ void BattlegroundQueueService::Initialize()
         return;
     }
 
-    sLog.outString("TortoiseBots: demand-aware BG auto-queue enabled interval %u max %u (WSG/AB/AV, guid 1337 bypass, core BattleGroundMgr ownership)",
+    sLog.outString("TortoiseBots: demand-aware BG auto-queue enabled interval %u max %u (WSG/AB/AV/TG, guid 1337 bypass, core BattleGroundMgr ownership)",
         sPlayerbotAIConfig.randomBotBgQueueInterval, sPlayerbotAIConfig.randomBotBgMaxQueuePerInterval);
 }
 
@@ -193,7 +193,7 @@ bool BattlegroundQueueService::IsEligible(::Player* bot) const
     {
         BattleGroundQueueTypeId q = BattleGroundQueueTypeId(i);
         BattleGroundTypeId bgType = sServerFacade.BGTemplateId(q);
-        if (bgType != BATTLEGROUND_WS && bgType != BATTLEGROUND_AB && bgType != BATTLEGROUND_AV)
+        if (bgType != BATTLEGROUND_WS && bgType != BATTLEGROUND_AB && bgType != BATTLEGROUND_AV && bgType != BATTLEGROUND_TG)
             continue;
         BattleGround* bg = sBattleGroundMgr.GetBattleGroundTemplate(bgType);
         if (!bg)
@@ -267,7 +267,7 @@ void BattlegroundQueueService::PruneOwnedQueueSet()
         {
             BattleGroundQueueTypeId q = BattleGroundQueueTypeId(i);
             BattleGroundTypeId bgType = sServerFacade.BGTemplateId(q);
-            if (bgType != BATTLEGROUND_WS && bgType != BATTLEGROUND_AB && bgType != BATTLEGROUND_AV)
+            if (bgType != BATTLEGROUND_WS && bgType != BATTLEGROUND_AB && bgType != BATTLEGROUND_AV && bgType != BATTLEGROUND_TG)
                 continue;
             if (p->InBattleGroundQueueForBattleGroundQueueType(q))
                 liveQueued.insert(EncodeOwnedKey(p->GetObjectGuid().GetCounter(), uint32_t(q)));
@@ -304,7 +304,7 @@ bool BattlegroundQueueService::TryQueue(::Player* bot, uint32 queueTypeValue)
 
     BattleGroundQueueTypeId queueType = BattleGroundQueueTypeId(queueTypeValue);
     BattleGroundTypeId bgType = sServerFacade.BGTemplateId(queueType);
-    if (bgType != BATTLEGROUND_WS && bgType != BATTLEGROUND_AB && bgType != BATTLEGROUND_AV)
+    if (bgType != BATTLEGROUND_WS && bgType != BATTLEGROUND_AB && bgType != BATTLEGROUND_AV && bgType != BATTLEGROUND_TG)
         return false;
 
     BattleGround* bg = sBattleGroundMgr.GetBattleGroundTemplate(bgType);
@@ -492,7 +492,7 @@ void BattlegroundQueueService::ReconcileMasterQueue()
             if (!bot->InBattleGroundQueueForBattleGroundQueueType(q))
                 continue;
             BattleGroundTypeId bgType = sServerFacade.BGTemplateId(q);
-            if (bgType != BATTLEGROUND_WS && bgType != BATTLEGROUND_AB && bgType != BATTLEGROUND_AV)
+            if (bgType != BATTLEGROUND_WS && bgType != BATTLEGROUND_AB && bgType != BATTLEGROUND_AV && bgType != BATTLEGROUND_TG)
                 continue;
             uint64_t key = EncodeOwnedKey(bot->GetObjectGuid().GetCounter(), uint32_t(q));
             if (m_ownedQueuedGuids.find(key) == m_ownedQueuedGuids.end())
@@ -623,7 +623,7 @@ void BattlegroundQueueService::OnLeaseEvicted(uint32_t guidLow)
         if (m_ownedQueuedGuids.find(key) == m_ownedQueuedGuids.end())
             continue;
         BattleGroundTypeId bgType = sServerFacade.BGTemplateId(q);
-        if (bgType != BATTLEGROUND_WS && bgType != BATTLEGROUND_AB && bgType != BATTLEGROUND_AV)
+        if (bgType != BATTLEGROUND_WS && bgType != BATTLEGROUND_AB && bgType != BATTLEGROUND_AV && bgType != BATTLEGROUND_TG)
             continue;
         if (bot && bot->InBattleGroundQueueForBattleGroundQueueType(q))
         {

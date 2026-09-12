@@ -3,6 +3,10 @@
 #include "../behavior/PlayerConvenience.h"
 #include "../runtime/BotManager.h"
 #include "../runtime/RandomBotService.h"
+#include "../runtime/PlayerbotAIStorage.h"
+#include "playerbot/PlayerbotAI.h"
+#include "playerbot/PlayerbotAIConfig.h"
+#include "Group.h"
 #include "Log.h"
 #include "Map.h"
 #include "Player.h"
@@ -14,11 +18,41 @@ namespace TortoiseBots {
 
 BotPlayerAdapter::BotPlayerAdapter()
     : PlayerScript("tortoisebots_players", {
+        PLAYERHOOK_IS_MACHINE_DRIVEN,
+        PLAYERHOOK_IS_UPDATE_CRITICAL,
         PLAYERHOOK_ON_LOGIN,
         PLAYERHOOK_ON_MAP_CHANGED,
         PLAYERHOOK_ON_BEFORE_LOGOUT,
         PLAYERHOOK_ON_LOGOUT })
 {
+}
+
+bool BotPlayerAdapter::IsMachineDriven(Player const* player)
+{
+    // Network ownership wins immediately, even before the world-owned record
+    // reconciliation has removed a former bot's adapter.
+    return player && player->GetSession() && player->GetSession()->IsHeadless() &&
+        PlayerbotAIStorage::Instance().GetAI(const_cast<Player*>(player));
+}
+
+bool BotPlayerAdapter::IsUpdateCritical(Player const* player)
+{
+    if (!IsMachineDriven(player)) return false;
+    auto* ai = PlayerbotAIStorage::Instance().GetAI(const_cast<Player*>(player));
+    if (!ai) return false;
+    float const range = ai::WorldPosition(const_cast<Player*>(player)).getVisibilityDistance() +
+        sPlayerbotAIConfig.reactDistance;
+    if (player->IsBeingTeleported() || ai->HasRealPlayerMaster() || ai->HasPlayerNearby(range))
+        return true;
+    if (Group* group = const_cast<Player*>(player)->GetGroup())
+        for (GroupReference* ref = group->GetFirstMember(); ref; ref = ref->next())
+        {
+            Player* member = ref->getSource();
+            if (member && member != player && member->IsInWorld() && member->GetSession() &&
+                member->GetSession()->HasNetworkTransport())
+                return true;
+        }
+    return false;
 }
 
 void BotPlayerAdapter::OnLogin(Player* player)

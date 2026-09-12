@@ -99,6 +99,9 @@ bool AttackEnemyPlayerAction::isUseful()
 bool AttackEnemyFlagCarrierAction::isUseful()
 {
     Unit* target = context->GetValue<Unit*>("enemy flag carrier")->Get();
+    if (bot->GetBattleGroundTypeId() == BATTLEGROUND_TG)
+        return target && target->HasAura(59005) &&
+            sServerFacade.IsDistanceLessOrEqualThan(sServerFacade.GetDistance2d(bot, target), 75.0f);
     // Was bot->HasAura(...) (2026-07-27, fixed) - that's the "am I personally
     // carrying a flag" check used correctly one function above in
     // DpsAssistAction::isUseful() ("if carry flag, do not start fight"), but

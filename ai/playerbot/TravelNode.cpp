@@ -1,3 +1,4 @@
+#include <stdexcept>
 #include "TravelNode.h"
 #include "playerbot/TravelMgr.h"
 #include "playerbot/TravelRoutePolicy.h"
@@ -102,6 +103,42 @@ void TravelNodePath::calculateCost(bool distanceOnly)
     catch (...)
     {
     }
+}
+
+bool TravelNodePath::recalculateGeometry()
+{
+    float refreshedDistance = 0.1f;
+    float refreshedSwimDistance = 0.0f;
+    WorldPosition lastPoint;
+
+    for (WorldPosition const& point : path)
+    {
+        if (lastPoint && point.getMapId() == lastPoint.getMapId())
+        {
+            float const segmentDistance = point.distance(lastPoint);
+            if (std::isfinite(segmentDistance) && segmentDistance >= 0.0f)
+            {
+                TerrainInfo const* terrain = sTerrainMgr.LoadTerrain(point.getMapId());
+                bool const pointInWater = terrain &&
+                    terrain->IsInWater(point.getX(), point.getY(), point.getZ());
+                bool const lastPointInWater = terrain &&
+                    terrain->IsInWater(lastPoint.getX(), lastPoint.getY(), lastPoint.getZ());
+
+                refreshedDistance += segmentDistance;
+                if (pointInWater || lastPointInWater)
+                    refreshedSwimDistance += segmentDistance;
+            }
+        }
+
+        lastPoint = point;
+    }
+
+    refreshedSwimDistance = std::min(refreshedSwimDistance, refreshedDistance);
+    bool const changed = std::fabs(distance - refreshedDistance) > 0.1f ||
+        std::fabs(swimDistance - refreshedSwimDistance) > 0.1f;
+    distance = refreshedDistance;
+    swimDistance = refreshedSwimDistance;
+    return changed;
 }
 
 //The cost to travel this path.
@@ -298,17 +335,9 @@ TravelNodePath* TravelNode::buildPath(TravelNode* endNode, Unit* bot, bool postP
     path = endPos.GetPathFromPath(path, bot);
     bool canPath = endPos.isPathTo(path);
 
-    //Cheat a little for walk -> portal/transport.
-    if (!canPath && !isTransport() && !getAreaTriggerId() && (endNode->GetAreaTriggerId() || endNode->IsTransport()))
-    {
-        if (endPos.isPathTo(path, 20.0f))
-        {
-            if(path.back().distance(endPos) > 1.0f)
-                path.push_back((endPos+path.back())*0.5f);
-            path.push_back(endPos);
-            canPath = true;
-        }
-    }
+    // Walking links must end on the native walkable path. Portal activation
+    // and transport boarding are separate movement actions, never a fabricated
+    // straight-line extension of a failed ground query.
 
     if (canPath && path.size() == 2 && this->getDistance(endNode) > 5.0f) //Very small path probably bad pathfinder or flying. Stop using it.
         canPath = false;
@@ -359,11 +388,16 @@ TravelNodePath* TravelNode::buildPath(TravelNode* endNode, Unit* bot, bool postP
                 path = backPath;
                 canPath = backNodePath->getComplete();
             }
-            else  if (path.back().distance(backPath.back()) < 5.0f) //Both paths are nearly touching. Make a jump.
+            else if (!path.empty() && path.back().distance(backPath.back()) < 5.0f)
             {
-                std::reverse(backPath.begin(), backPath.end());
-                path.insert(path.end(), backPath.begin(), backPath.end());
-                canPath = true;
+                auto connector = path.back().GetPathTo(backPath.back(), bot);
+                if (backPath.back().isPathTo(connector))
+                {
+                    path.insert(path.end(), std::next(connector.begin()), connector.end());
+                    std::reverse(backPath.begin(), backPath.end());
+                    path.insert(path.end(), std::next(backPath.begin()), backPath.end());
+                    canPath = true;
+                }
             }
         }
     }
@@ -2088,8 +2122,8 @@ void TravelNodeMap::manageNodes(Unit* bot, bool mapFull)
 
 void TravelNodeMap::LoadMaps()
 {
-    // Full-map node generation is disabled in the native module. Individual
-    // path requests load only the required navmesh data through WorldPosition.
+    // Individual path requests load only the required navmesh data through
+    // WorldPosition; generation does not eagerly load every world tile.
 }
 
 void TravelNodeMap::generateNpcNodes()
@@ -2596,12 +2630,15 @@ void TravelNodeMap::generateWalkPaths()
     for (auto& map : nodeMaps)
     {
         uint32 mapId = map.first;
-        calculations.push_back(std::async([this,mapId, &bar] { generateWalkPathMap(mapId, &bar); }));
+        if (sPlayerbotAIConfig.asyncTravelPartitions)
+            calculations.push_back(std::async(std::launch::async, [this,mapId, &bar] { generateWalkPathMap(mapId, &bar); }));
+        else
+            generateWalkPathMap(mapId, &bar);
     }
 
     for (uint32 i = 0; i < calculations.size(); i++)
     {
-        calculations[i].wait();
+        calculations[i].get();
     }
 
     sLog.outString(">> Generated paths for " SIZEFMTD " nodes.", sTravelNodeMap.GetNodes().size());
@@ -2768,7 +2805,7 @@ void TravelNodeMap::generateHelperNodes()
 
     for (uint32 i = 0; i < calculations.size(); i++)
     {
-        calculations[i].wait();
+        calculations[i].get();
     }
 
     sLog.outString(">> Generated " SIZEFMTD " helpdernodes.", sTravelNodeMap.GetNodes().size()-old);
@@ -2932,89 +2969,69 @@ void TravelNodeMap::removeUselessPaths()
     for (auto& map : nodeMaps)
     {
         uint32 mapId = map.first;
-        calculations.push_back(std::async([this, mapId] { removeUselessPathMap(mapId); }));
+        if (sPlayerbotAIConfig.asyncTravelPartitions)
+            calculations.push_back(std::async(std::launch::async, [this, mapId] { removeUselessPathMap(mapId); }));
+        else
+            removeUselessPathMap(mapId);
         bar.step();
     }
 
     BarGoLink bar2(calculations.size());
     for (uint32 i = 0; i < calculations.size(); i++)
     {
-        calculations[i].wait();
+        calculations[i].get();
         bar2.step();
     }
 }
 
 void TravelNodeMap::calculatePathCosts()
 {
-    BarGoLink bar(sTravelNodeMap.GetNodes().size());
-
-    std::vector<std::future<void>> calculations;
-
-    for (auto& startNode : sTravelNodeMap.GetNodes())
-    {
-        bar.step();
-
-        for (auto& path : *startNode->GetLinks())
+    // Startup work is bounded in memory: do not launch one future per edge or
+    // recurse forever when a failed calculation leaves its flag unset.
+    uint32 calculated = 0;
+    for (auto* node : GetNodes())
+        for (auto const& link : *node->GetLinks())
         {
-            TravelNodePath* nodePath = path.second;
-
-            if (path.second->getPathType() != TravelNodePathType::walk)
-                continue;
-
-            if (nodePath->GetCalculated())
-                continue;
-
-            calculations.push_back(std::async([nodePath] {nodePath->calculateCost(); }));
+            auto* path = link.second;
+            if (path->getPathType() != TravelNodePathType::walk || path->GetCalculated()) continue;
+            path->calculateCost();
+            if (!path->GetCalculated())
+                throw std::runtime_error("TortoiseBots: travel path cost calculation failed; cache was not saved");
+            ++calculated;
         }
-    }
-
-    BarGoLink bar2(calculations.size());
-    for (uint32 i = 0; i < calculations.size(); i++)
-    {
-        bar2.step();
-        calculations[i].wait();
-    }
-
-    sLog.outString(">> Calculated cost for " SIZEFMTD " paths.", calculations.size());
-
-    if (calculations.size()) //Repeat until we have all paths calculated.
-        calculatePathCosts();
+    sLog.outString(">> Calculated cost for %u paths.", calculated);
 }
 
 void TravelNodeMap::generatePaths(bool helpers)
 {
-    (void)helpers;
-    sLog.outError("TortoiseBots: travel-node generation is unavailable with the pinned core PathInfo area filter; use persisted nodes or direct movement.");
+    sLog.outString("-Calculating native walkable paths");
+    generateWalkPaths();
+    if (helpers) generateHelperNodes();
+    removeLowNodes();
+    removeUselessPaths();
+    calculatePathCosts();
 }
 
 void TravelNodeMap::generateAll()
 {
-    if (m_nodes.empty())
-        return;
+    bool const generate = sPlayerbotAIConfig.generateTravelNodes && (hasToGen || hasToFullGen);
+    if (generate && hasToFullGen) generateNodes();
+    if (m_nodes.empty()) return;
 
-    if (hasToGen || hasToFullGen)
-    {
-        sLog.outError("TortoiseBots: travel-node generation is unavailable with the pinned core PathInfo area filter; use persisted nodes or direct movement.");
-        hasToGen = false;
-        hasToFullGen = false;
-    }
-
-    sLog.outString("-Calculating mapoffset");
     calcMapOffset();
-
-    sLog.outString("-Generating maptransfers");
     sTravelMgr.LoadMapTransfers();
+    if (generate)
+    {
+        generatePaths(false);
+        hasToGen = hasToFullGen = false;
+        hasToSave = true;
+    }
+    else if (hasToGen || hasToFullGen)
+        sLog.outError("TortoiseBots: travel graph needs regeneration; enable AiPlayerbot.GenerateTravelNodes in an offline preparation run.");
 
-    // The bundled graph can use flight IDs from a different DBC layout.
-    // Refresh native IDs AND geometry before coverage/route queries, not
-    // only when generating walking paths. This does not dirty the SQL cache
-    // or reset bots; the small native flight pass runs once per startup.
-    sLog.outString("-Generating taxi paths");
+    // Native flight IDs and geometry are refreshed even for a populated cache.
     generateTaxiPaths();
-
-    sLog.outString("-Calculating coverage"); // This prevents crashes when bots from multiple maps try to calculate this on the fly.
-    for (auto& node : GetNodes())
-        node->hasRouteTo(node);
+    for (auto* node : GetNodes()) node->hasRouteTo(node);
 }
 
 void TravelNodeMap::printMap()
@@ -3254,15 +3271,13 @@ void TravelNodeMap::loadNodeStore()
         }
         else
         {
-            // A fresh native installation has the optional travel-node tables
-            // but no generated rows. Treat that as an unavailable optional
-            // dataset instead of entering the legacy all-map generator during
-            // world startup; that path is expensive and can dereference
-            // incomplete map data. Travel features remain unavailable until a
-            // populated node store is supplied.
-            hasToFullGen = false;
+            // A missing table/query error is not an empty, writable dataset.
+            auto count = WorldDatabase.PQuery("SELECT COUNT(*) FROM ai_playerbot_travelnode");
+            if (!count || count->Fetch()[0].GetUInt64() != 0)
+                throw std::runtime_error("TortoiseBots: travel-node dataset unavailable; apply the module schema before generation");
+            hasToFullGen = sPlayerbotAIConfig.generateTravelNodes;
             hasToGen = false;
-            sLog.outInfo("TortoiseBots: travel-node dataset is empty or unavailable; skipping startup graph generation");
+            sLog.outInfo("TortoiseBots: empty travel-node dataset; startup generation %s", hasToFullGen ? "requested" : "disabled");
             return;
         }
     }
@@ -3400,6 +3415,43 @@ void TravelNodeMap::loadNodeStore()
                 path.setPath(newPath);
             }
         }
+        // Persisted walk geometry can outlive route/pathfinder corrections.
+        // Rebuild distance and water exposure from the actual stored points so
+        // A* does not keep selecting stale shortcuts through water.
+        uint32 normalizedWalkPaths = 0;
+        uint32 walkPathsWithSwimming = 0;
+        for (auto& node : getNodes())
+        {
+            for (auto& [endNode, path] : *node->getPaths())
+            {
+                if (path.getPathType() != TravelNodePathType::walk || path.getPath().size() < 2)
+                    continue;
+
+                if (path.recalculateGeometry())
+                    ++normalizedWalkPaths;
+                if (path.getSwimDistance() > 0.1f)
+                    ++walkPathsWithSwimming;
+            }
+        }
+        sLog.outString(">> Normalized %u playerbot walk-path geometries; %u paths include swimming.",
+            normalizedWalkPaths, walkPathsWithSwimming);
+
+        // Restore the native playerbot taxi preference from the loaded spline.
+        // This is intentionally much cheaper than physical flight duration so
+        // roads and ocean shortcuts do not displace an available taxi route.
+        uint32 normalizedFlightPaths = 0;
+        for (auto& node : getNodes())
+        {
+            for (auto& [endNode, path] : *node->getPaths())
+            {
+                if (path.getPathType() != TravelNodePathType::flightPath || path.getPath().size() < 2)
+                    continue;
+
+                path.setPathAndCost(path.getPath(), PLAYERBOT_TAXI_ROUTE_DIVISOR);
+                ++normalizedFlightPaths;
+            }
+        }
+        sLog.outString(">> Normalized %u playerbot flight-path costs to native route preference.", normalizedFlightPaths);
     }
 }
 

@@ -90,7 +90,7 @@ bool MovementAction::FlyDirect(const WorldPosition &startPosition, const WorldPo
     return false;
 }
 
-bool MovementAction::UseTaxi(PlayerbotAI* ai, uint32 entry, bool needNpc)
+bool MovementAction::UseTaxi(PlayerbotAI* ai, uint32 entry, bool needNpc, Creature* sourceNpc)
 {
     AiObjectContext* context = ai->GetAiObjectContext();
     Player* bot = ai->GetBot();
@@ -98,18 +98,70 @@ bool MovementAction::UseTaxi(PlayerbotAI* ai, uint32 entry, bool needNpc)
     TaxiPathEntry const* tEntry = sTaxiPathStore.LookupEntry(entry);
 
     if (!tEntry)
-        return false;
-
-    Creature* unit = nullptr;
-
-    if (needNpc)
     {
+        return false;
+    }
+
+    Creature* unit = sourceNpc;
+
+    // Turtle validates both endpoints in the native activation method (not
+    // just in the client opcode as CMaNGOS does). Discover only a legitimate
+    // source at its interactable flight master; never bypass player checks.
+    TaxiNodesEntry const* fromNode = sTaxiNodesStore.LookupEntry(tEntry->from);
+    TaxiNodesEntry const* toNode = sTaxiNodesStore.LookupEntry(tEntry->to);
+    uint32 const factionIndex = bot->GetTeam() == ALLIANCE ? 1 : 0;
+    if (!fromNode || !toNode || !fromNode->MountCreatureID[factionIndex] ||
+        !toNode->MountCreatureID[factionIndex])
+    {
+        return false;
+    }
+    if (!bot->isTaxiCheater() && !bot->GetTaxi().IsTaximaskNodeKnown(tEntry->to))
+    {
+        return false;
+    }
+
+    if (needNpc || (!bot->isTaxiCheater() && !bot->GetTaxi().IsTaximaskNodeKnown(tEntry->from)))
+    {
+        // RPG taxi already resolved the precise NPC from its target GUID. Keep
+        // that established interaction result instead of discarding it and
+        // performing a second, cache-dependent lookup at a crowded hub.
+        if (unit && sObjectMgr.GetNearestTaxiNode(unit->GetPositionX(), unit->GetPositionY(),
+            unit->GetPositionZ(), unit->GetMapId(), bot->GetTeam()) != tEntry->from)
+            unit = nullptr;
+
+        // Resolve the exact interactable flight master from the AI's nearby
+        // object GUIDs first.  This is the established playerbot interaction
+        // path and, unlike a generic grid search, also sees creatures kept in
+        // the map's world-object container.  The latter distinction matters
+        // at busy hubs: Southshore's Darla was interactable by GUID while
+        // FindNearestInteractableNpcWithFlag repeatedly returned null, leaving
+        // bots queued at the node and retrying the same long travel leg.
         std::list<ObjectGuid> npcs = AI_VALUE(std::list<ObjectGuid>, "nearest npcs");
-        for (std::list<ObjectGuid>::iterator i = npcs.begin(); i != npcs.end(); i++)
+        for (ObjectGuid const& guid : npcs)
         {
-            unit = bot->GetNPCIfCanInteractWith(*i, UNIT_NPC_FLAG_FLIGHTMASTER);
             if (unit)
                 break;
+
+            Creature* candidate = bot->GetNPCIfCanInteractWith(guid, UNIT_NPC_FLAG_FLIGHTMASTER);
+            if (!candidate)
+                continue;
+
+            if (sObjectMgr.GetNearestTaxiNode(candidate->GetPositionX(), candidate->GetPositionY(),
+                candidate->GetPositionZ(), candidate->GetMapId(), bot->GetTeam()) != tEntry->from)
+                continue;
+
+            unit = candidate;
+            break;
+        }
+
+        // Retain the live spatial lookup as a fallback for callers that have
+        // not populated the nearby-NPC value yet.
+        if (!unit)
+        {
+            unit = bot->FindNearestInteractableNpcWithFlag(UNIT_NPC_FLAG_FLIGHTMASTER);
+            if (unit && sObjectMgr.GetNearestTaxiNode(unit->GetPositionX(), unit->GetPositionY(),
+                unit->GetPositionZ(), unit->GetMapId(), bot->GetTeam()) != tEntry->from)
+                unit = nullptr;
         }
 
         if (!unit)
@@ -125,10 +177,15 @@ bool MovementAction::UseTaxi(PlayerbotAI* ai, uint32 entry, bool needNpc)
         }
     }
 
+    if (!bot->isTaxiCheater() && !bot->GetTaxi().IsTaximaskNodeKnown(tEntry->from))
+    {
+        return false;
+    }
+
     uint32 botMoney = bot->GetMoney();
     if (ai->HasCheat(BotCheatMask::gold) || ai->HasCheat(BotCheatMask::taxi))
     {
-        bot->SetMoney(botMoney + tEntry->price);
+        bot->SetMoney(uint32(std::min<uint64>(uint64(botMoney) + tEntry->price, UINT32_MAX)));
     }
 
     bot->CleanupFlagsOnTaxiPathFinished();
@@ -517,7 +574,7 @@ bool MovementAction::WaitForTransport()
     return false;
 }
 
-TravelPath MovementAction::ResolveMovePath(const WorldPosition& startPosition, const WorldPosition& endPosition, Unit* mover, LastMovement& lastMove)
+TravelPath MovementAction::ResolveMovePath(const WorldPosition& startPosition, const WorldPosition& endPosition, Unit* mover, LastMovement& lastMove, bool requirePath)
 {
     float totalDistance = startPosition.distance(endPosition);
     float maxDistChange = totalDistance * 0.1f;
@@ -551,7 +608,8 @@ TravelPath MovementAction::ResolveMovePath(const WorldPosition& startPosition, c
     if (!lastMove.lastPath.empty() && !outMovePath.empty() && lastMove.lastPath.GetBack().distance(endPosition) <= outMovePath.GetBack().distance(endPosition))
         outMovePath = lastMove.lastPath;
 
-    if (outMovePath.empty())
+    // A failed ground query must never become an unchecked straight line.
+    if (outMovePath.empty() && !requirePath)
         outMovePath.addPoint(endPosition);
 
     return outMovePath;
@@ -698,92 +756,61 @@ void MovementAction::UpdateFlyingState(
 
 void MovementAction::DispatchMovement(TravelPath movePath, bool generatePath, bool masterWalking)
 {
-    MotionMaster& mm = *bot->GetMotionMaster();
-
-    mm.Clear();
-
-    ForcedMovement moveMode = masterWalking ? FORCED_MOVEMENT_WALK : FORCED_MOVEMENT_RUN;
-
     std::vector<WorldPosition> path = movePath.GetPointPath();
-
-    if (!generatePath || !bot->IsFlying())
+    if (path.empty()) return;
+    MotionMaster& mm = *bot->GetMotionMaster();
+    mm.Clear();
+    ForcedMovement mode = masterWalking ? FORCED_MOVEMENT_WALK : FORCED_MOVEMENT_RUN;
+    if (!generatePath || bot->IsFreeFlying() || path.size() < 2)
     {
-        WorldPosition movePosition = path.back();
-
-        // Tortoise's MovePoint signature is (id, x, y, z, options, speed, orientation),
-        // NOT cmangos's (id, x, y, z, ForcedMovement, bool generatePath). The ported call
-        // below used to pass `moveMode` into `options` and the `generatePath` bool into the
-        // `speed` float — so generatePath==true set the velocity to 1.0 yd/s, making bots
-        // crawl slower than walking. Translate the intent into proper MoveOptions instead and
-        // leave speed at its default so it is derived from the run/walk movement flags.
-        uint32 moveOptions = (moveMode == FORCED_MOVEMENT_WALK) ? MOVE_WALK_MODE : MOVE_RUN_MODE;
-        if (generatePath)
-            moveOptions |= MOVE_PATHFINDING;
-        mm.MovePoint(movePosition.GetMapId(),
-            movePosition.getX(),
-            movePosition.getY(),
-            movePosition.getZ(),
-            moveOptions);
-    }
-
-    GeneratePathAvoidingHazards(path);
-
-    std::vector<G3D::Vector3> pointPath = WorldPosition().toPointsArray(path);
-    float size = WorldPosition().GetPathLength(path);
-
-    bool usePath = true;
-
-    if (usePath)
-    {
-        bool normalizeZ = true;
-
-        for (auto& p : pointPath)
-        {
-            if (bot->GetTransport())
-                bot->GetTransport()->CalculatePassengerPosition(p.x, p.y, p.z);
-            bot->UpdateAllowedPositionZ(p.x, p.y, p.z);
-            if (bot->GetTransport())
-                bot->GetTransport()->CalculatePassengerOffset(p.x, p.y, p.z);
-        }
-
-        Movement::MoveSplineInit init(*bot, "DispatchMovement");
-        init.MovebyPath(pointPath);
-        init.SetWalk(moveMode == FORCED_MOVEMENT_WALK);
-        if (bot->GetTransport())
-            init.SetTransport(bot->GetTransport()->GetGUIDLow());
-        init.Launch();
+        WorldPosition destination = path.back();
+        uint32 options = masterWalking ? MOVE_WALK_MODE : MOVE_RUN_MODE;
+        if (generatePath) options |= MOVE_PATHFINDING;
+        mm.MovePoint(destination.GetMapId(), destination.getX(), destination.getY(), destination.getZ(), options);
     }
     else
     {
-        WorldPosition movePosition = path.back();
-
-        // Tortoise's MovePoint signature is (id, x, y, z, options, speed, orientation),
-        // NOT cmangos's (id, x, y, z, ForcedMovement, bool generatePath). The ported call
-        // below used to pass `moveMode` into `options` and the `generatePath` bool into the
-        // `speed` float — so generatePath==true set the velocity to 1.0 yd/s, making bots
-        // crawl slower than walking. Translate the intent into proper MoveOptions instead and
-        // leave speed at its default so it is derived from the run/walk movement flags.
-        uint32 moveOptions = (moveMode == FORCED_MOVEMENT_WALK) ? MOVE_WALK_MODE : MOVE_RUN_MODE;
-        if (generatePath)
-            moveOptions |= MOVE_PATHFINDING;
-        mm.MovePoint(movePosition.GetMapId(),
-            movePosition.getX(),
-            movePosition.getY(),
-            movePosition.getZ(),
-            moveOptions);
+        // Launch replaces vertex zero with the live position. Retain the first
+        // route corner when clipping has left it ahead of the moving player.
+        if (path.front().distance(bot) > 0.01f) path.insert(path.begin(), WorldPosition(bot));
+        GeneratePathAvoidingHazards(path);
+        auto points = WorldPosition().toPointsArray(path);
+        for (auto& point : points)
+        {
+            if (bot->GetTransport()) bot->GetTransport()->CalculatePassengerPosition(point.x, point.y, point.z);
+            bot->UpdateAllowedPositionZ(point.x, point.y, point.z);
+            if (bot->GetTransport()) bot->GetTransport()->CalculatePassengerOffset(point.x, point.y, point.z);
+        }
+        // The native path generator owns continuation and speed changes.
+        mm.MovePath(points, mode, false, masterWalking);
     }
-    WaitForReach(size);
+    WaitForReach(WorldPosition().GetPathLength(path));
 }
-
 
 Unit* MovementAction::GetMover(Player* bot)
 {
     return bot;
 }
 
+bool MovementAction::TryMountForTravel(float distance, bool idle, bool react, bool noPath)
+{
+    // Travel can outrank idle maintenance. Consult the native mount action
+    // before a long ground journey, regardless of its map or destination.
+    if (distance <= 40.0f || idle || react || noPath || bot->IsMounted() ||
+        bot->IsInCombat() || ai->IsStateActive(BotState::BOT_STATE_COMBAT) ||
+        bot->GetTransport() || bot->IsTaxiFlying() || bot->IsFlying() ||
+        bot->IsFalling() || ai->IsJumping() || bot->IsNonMeleeSpellCasted(false)) return false;
+    if (!ai->DoSpecificAction("check mount state", Event(), true)) return false;
+    // The nested native action owns cast duration; propagate it to the travel
+    // action so its successful return cannot schedule movement over the cast.
+    if (Action* mount = ai->GetAiObjectContext()->GetAction("check mount state"))
+        SetDuration(mount->GetDuration());
+    return true;
+}
+
 bool MovementAction::MoveTo2(const WorldPosition& endPos, bool idle, bool react, bool noPath, bool ignoreEnemyTargets)
 {
-    if (!endPos.isValid())
+    if (!endPos.isValid() || !std::isfinite(endPos.getX()) || !std::isfinite(endPos.getY()) || !std::isfinite(endPos.getZ()))
         return false;
 
     UpdateMovementState();
@@ -794,6 +821,19 @@ bool MovementAction::MoveTo2(const WorldPosition& endPos, bool idle, bool react,
     Unit* mover = GetMover(bot);
 
     LastMovement& lastMove = AI_VALUE(LastMovement&, "last movement");
+    int32 const destinationCellX = int32(std::floor(endPos.getX() / 8.0f));
+    int32 const destinationCellY = int32(std::floor(endPos.getY() / 8.0f));
+    int32 const destinationCellZ = int32(std::floor(endPos.getZ() / 8.0f));
+    uint64_t const generation = ai->GetTransitionGeneration();
+    uint32 const nowMs = WorldTimer::getMSTime();
+    bool const sameFailure = lastMove.failedPathMap == endPos.getMapId() &&
+        lastMove.failedPathInstance == bot->GetInstanceId() && lastMove.failedPathGeneration == generation &&
+        lastMove.failedPathCellX == destinationCellX && lastMove.failedPathCellY == destinationCellY &&
+        lastMove.failedPathCellZ == destinationCellZ;
+    if (sameFailure && int32(lastMove.failedPathRetryUntil - nowMs) > 0) return false;
+    if (!sameFailure) lastMove.clearPathFailure();
+
+
 
     bool detailedMove = ai->AllowActivity(DETAILED_MOVE_ACTIVITY, true);
     if (!detailedMove && lastMove.nextTeleport)
@@ -835,12 +875,31 @@ bool MovementAction::MoveTo2(const WorldPosition& endPos, bool idle, bool react,
 
     bool isWalking = false;
 
-    TravelPath movePath = ResolveMovePath(startPos, endPos, mover, lastMove);
+    bool generatePath = !noPath && !bot->IsFlying() && !bot->HasMovementFlag(MOVEFLAG_SWIMMING) && !bot->IsInWater() && !sServerFacade.IsUnderwater(bot);
+    TravelPath movePath = ResolveMovePath(startPos, endPos, mover, lastMove, generatePath);
 
     lastMove.setPath(movePath);
 
     if (movePath.empty())
+    {
+        // Use the existing bounded ballistic traversal only after a required
+        // ground route fails; all destinations share this recovery path.
+        if (generatePath && detailedMove && mover == bot)
+        {
+            auto* jump = dynamic_cast<JumpAction*>(ai->GetAiObjectContext()->GetAction("jump"));
+            if (jump && jump->TryGroundTraversal(endPos))
+            {
+                lastMove.clearPathFailure();
+                return true;
+            }
+        }
+        lastMove.failedPathMap = endPos.getMapId(); lastMove.failedPathInstance = bot->GetInstanceId();
+        lastMove.failedPathCellX = destinationCellX; lastMove.failedPathCellY = destinationCellY;
+        lastMove.failedPathCellZ = destinationCellZ; lastMove.failedPathGeneration = generation;
+        lastMove.failedPathRetryUntil = nowMs + sPlayerbotAIConfig.pathFailureRetryMs;
         return false;
+    }
+    lastMove.clearPathFailure();
 
 
     if (!bot->GetTransport())
@@ -936,6 +995,8 @@ bool MovementAction::MoveTo2(const WorldPosition& endPos, bool idle, bool react,
         }
     }
 
+    if (TryMountForTravel(totalDistance, idle, react, noPath)) return true;
+
     bool masterWalking = false;
     if (sPlayerbotAIConfig.walkDistance)
     {
@@ -949,7 +1010,7 @@ bool MovementAction::MoveTo2(const WorldPosition& endPos, bool idle, bool react,
         }
     }
 
-    bool generatePath = !noPath && !bot->IsFlying() && !bot->HasMovementFlag(MOVEFLAG_SWIMMING) && !bot->IsInWater() && !sServerFacade.IsUnderwater(bot);
+
 
 
 
@@ -2205,6 +2266,49 @@ bool MoveToAction::Execute(Event& event)
 bool JumpAction::isUseful()
 {
     return bot->IsInWorld() && ai->HasPlayerNearby() && !ai->IsJumping();
+}
+
+bool JumpAction::TryGroundTraversal(const WorldPosition& objective)
+{
+    BattleGround* bg = bot->GetBattleGround();
+    if ((bg && bg->GetStatus() != STATUS_IN_PROGRESS) || !bot->IsInWorld() || bot->IsDead() || !ai->CanMove() || ai->IsJumping() ||
+        bot->IsNonMeleeSpellCasted(false) || bot->GetTransport() || bot->IsFlying() ||
+        bot->IsInWater() || bot->IsFalling() || bot->HasMovementFlag(MOVEFLAG_SWIMMING) ||
+        objective.getMapId() != bot->GetMapId()) return false;
+    uint32 now = WorldTimer::getMSTime();
+    if (m_lastTraversalAttempt && WorldTimer::getMSTimeDiff(m_lastTraversalAttempt,now) < 5000) return false;
+    m_lastTraversalAttempt = now;
+    WorldPosition src(bot);
+    auto walking = objective.getPathStepFrom(src,bot,false);
+    // A usable walk is always preferred. Do not jump merely because another
+    // action delayed movement or a path-failure retry timer is still active.
+    if (walking.size() > 1 && src.distance(walking.back()) > 2.0f) return false;
+    float oldRemaining = objective.distance(src);
+    float vSpeed = std::min(sPlayerbotAIConfig.jumpVSpeed,7.96f);
+    unsigned samples=0;
+    for (float hSpeed : {bot->GetSpeed(MOVE_RUN),bot->GetSpeed(MOVE_WALK)})
+    {
+        for (unsigned direction=0; direction<8; ++direction)
+        {
+            float angle=src.getAngleTo(objective)+direction*M_PI_F/4.0f;
+            float time=0,distance=0,height=0;bool good=true;
+            std::vector<WorldPosition> arc;
+            ++samples;
+            WorldPosition landing=CalculateJumpParameters(src,bot,angle,vSpeed,hSpeed,time,distance,height,good,arc);
+            if (!landing || !good || arc.empty() || !CanLand(landing,bot) || src.distance(landing)<1.0f) continue;
+            // Validate a player-walkable landing without moving/snapping the bot.
+            WorldPosition walkable=landing;
+            if (!walkable.ClosestCorrectPoint(1.0f,2.0f,bot->GetInstanceId()) ||
+                walkable.distance(landing)>1.0f) continue;
+            auto next=objective.getPathStepFrom(landing,bot,false);
+            if (next.size()<2 || objective.distance(next.back())+3.0f>=oldRemaining) continue;
+            WorldPosition highest=src;
+            for(auto const& point:arc) if(point.getZ()>highest.getZ()) highest=point;
+            bool moved=DoJump(landing,highest,angle,vSpeed,hSpeed,time,distance,highest.getZ(),true,false,false,false);
+            return moved;
+        }
+    }
+    return false;
 }
 
 bool JumpAction::Execute(ai::Event &event)

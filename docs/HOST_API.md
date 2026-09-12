@@ -509,3 +509,33 @@ still pending; a successful build is not performance parity with the old fork.
 
 Validation receipts and the exact candidate state are tracked in the core's
 `docs/MODULAR_MIGRATION_CHECKLIST.md`. Production has not been changed.
+
+### ManTech native coordinate path queries (2026-09-12)
+
+The migration core implements `PathInfo(mapId, instanceId)` for requests with
+explicit start/end vectors. It uses the same native Detour algorithm and
+per-thread map query as unit-owned paths, without creating a fake Player.
+Coordinate queries exclude steep polygons, reject absent maps/tiles and invalid
+coordinates, and cannot force a failed path into a direct shortcut. The instance
+argument does not select a second navmesh: native terrain meshes are map-scoped.
+Null-unit construction without a map remains invalid. Area-cost overlays and
+fish-area queries are still unsupported; their generation remains disabled.
+
+WorldPosition loads the requested tiles, uses the live unit only on its own map,
+and checks native path status. Travel generation is opt-in. Ground movement
+dispatch hands precomputed points to MotionMaster::MovePath as its sole owner;
+it no longer overwrites a point generator with an independent spline.
+
+### Scheduler classification port
+
+BotPlayerAdapter now registers the existing IsMachineDriven and
+IsUpdateCritical hooks. Only a headless character with attached module AI is
+machine-driven; network takeover wins even while an adapter still exists.
+Human masters, nearby network players/camera viewpoints, human party members
+and transfers request responsiveness. The core still owns immediate
+combat/taxi/BG/packet classification and bounded trait caching.
+
+This restores map/player scheduling classification, not parallel AI dispatch.
+AI remains world-owner-driven until shared BotManager records, packet/action
+state and cross-map mutation contracts are adapted. No OnAIUpdate hook has been
+enabled prematurely, and no global lock is presented as performance parity.

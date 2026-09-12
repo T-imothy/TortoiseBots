@@ -228,6 +228,7 @@ bool PlayerbotAIConfig::Initialize()
     jumpInPlaceChance = config.GetFloatDefault("AiPlayerbot.JumpInPlaceChance", 0.50f);
     jumpBackwardChance = config.GetFloatDefault("AiPlayerbot.JumpBackwardChance", 0.10f);
     jumpHeightLimit = config.GetFloatDefault("AiPlayerbot.JumpHeightLimit", 60.f);
+    pathFailureRetryMs = uint32(std::max(250, std::min(30000, config.GetIntDefault("AiPlayerbot.PathFailureRetryMs", 3000))));
     jumpVSpeed = config.GetFloatDefault("AiPlayerbot.JumpVSpeed", 7.96f);
     jumpHSpeed = config.GetFloatDefault("AiPlayerbot.JumpHSpeed", 7.0f);
     jumpInBg = config.GetBoolDefault("AiPlayerbot.JumpInBg", false);
@@ -701,10 +702,9 @@ bool PlayerbotAIConfig::Initialize()
     generateTravelNodes = config.GetBoolDefault("AiPlayerbot.GenerateTravelNodes", false);
     generateFishLocations = config.GetBoolDefault("AiPlayerbot.GenerateFishLocations", false);
     asyncTravelPartitions = config.GetBoolDefault("AiPlayerbot.AsyncTravelPartitions", false); // false = travel/terrain lookups on main thread only (crash-safe on cores without concurrent terrain load)
-    if (generateTravelNodes || generateFishLocations)
+    if (generateFishLocations)
     {
-        sLog.outError("TortoiseBots: travel/fish cache generation is disabled because the pinned core PathInfo has no area query or avoidance filter; use persisted caches or direct movement/fishing.");
-        generateTravelNodes = false;
+        sLog.outError("TortoiseBots: fish cache generation remains unsupported by the native area-query contract; use persisted fish locations.");
         generateFishLocations = false;
     }
     syncLevelWithPlayers = config.GetBoolDefault("AiPlayerbot.SyncLevelWithPlayers", false);

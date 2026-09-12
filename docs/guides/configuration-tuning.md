@@ -107,3 +107,23 @@ Using `.bot strategy <+|-strategy>` or the `/tbm` addon:
 are used only when this selector is zero. Restart after changing the selector.
 The main configuration can set `AhBot.ConfigFile` to an explicit path.
 CMaNGOS owner eligibility uses this module's verified random-account list.
+
+### Migration travel preparation
+
+`AiPlayerbot.GenerateTravelNodes` stays disabled by default. Enable it only for
+an isolated preparation run with matching DBC, maps, vmaps and mmaps to generate
+missing walking links. A populated cache still refreshes native taxi data and
+walk/swim geometry. Generation failures propagate without clearing pending work
+or declaring the cache saved. Missing/query-failed travel tables are not treated
+as a successfully loaded empty dataset.
+
+`AiPlayerbot.AsyncTravelPartitions` controls optional map-partition generation;
+the default runs sequentially. Cost processing is bounded and nonrecursive.
+Fish-location generation stays disabled because the host area-query capability
+is not implemented. No movement-speed override is introduced by this port.
+
+
+`AiPlayerbot.PathFailureRetryMs` defaults to 3000 and clamps to 250–30000 ms.
+It delays repeated failed requests for the same destination cell, map, instance
+and 64-bit transition generation. A changed destination/transfer or successful
+path clears that failure. The delay does not alter physical movement speed.

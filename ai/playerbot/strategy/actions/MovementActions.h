@@ -17,6 +17,7 @@ namespace ai
         MovementAction(PlayerbotAI* ai, std::string name) : Action(ai, name) {}
 
         static bool MinimalMove(PlayerbotAI* ai);
+        static bool UseTaxi(PlayerbotAI* ai, uint32 entry = 0, bool needNpc = true, Creature* sourceNpc = nullptr);
         static bool UseTransport(PlayerbotAI* ai, uint32 entry, WorldPosition dockPosition, WorldPosition exitPosition, bool doTeleport);
     protected:
         static bool MoveOnTransport(PlayerbotAI* ai, GenericTransport* transport, bool doTeleport);
@@ -31,7 +32,7 @@ namespace ai
            return MoveTo(location.mapId, location.x, location.y, location.z, idle, react, noPath, ignoreEnemyTargets);
         }
 
-        static bool UseTaxi(PlayerbotAI* ai, uint32 entry = 0, bool needNpc = true);
+
 
 
         bool WaitForTransport();
@@ -40,7 +41,7 @@ namespace ai
         TravelPath ResolveMovePath(const WorldPosition& startPosition,
             const WorldPosition& endPosition,
             Unit* mover,
-            LastMovement& lastMove);
+            LastMovement& lastMove, bool requirePath);
 
         bool HandleSpecialMovement(TravelPath& path);
 
@@ -53,6 +54,8 @@ namespace ai
         void DispatchMovement(TravelPath movePath, bool generatePath, bool masterWalking);
 
         Unit* GetMover(Player* bot);
+
+        bool TryMountForTravel(float distance, bool idle, bool react, bool noPath);
 
         bool MoveTo2(const WorldPosition& endPos, bool idle = false, bool react = false, bool noPath = false, bool ignoreEnemyTargets = false);
 
@@ -174,12 +177,14 @@ namespace ai
     {
     public:
         JumpAction(PlayerbotAI* ai) : MovementAction(ai, "jump"), Qualified() {}
+        bool TryGroundTraversal(const WorldPosition& objective);
         bool Execute(Event& event) override;
         bool isUseful() override;
 
         static WorldPosition CalculateJumpParameters(const WorldPosition& src, Unit* jumper, float angle, float vSpeed, float hSpeed, float &timeToLand, float &distanceToLand, float &maxHeight, bool &goodLanding, std::vector<WorldPosition> &path, float maxJumpHeight = sPlayerbotAIConfig.jumpHeightLimit);
 
     private:
+        uint32 m_lastTraversalAttempt = 0;
         bool DoJump(const WorldPosition& dest, const WorldPosition& highestPoint, float angle, float vSpeed, float hSpeed, float timeToLand, float distanceToLand, float maxHeight, bool goodLanding, bool jumpInPlace, bool jumpBackward, bool showOnly);
         bool JumpTowards(const WorldPosition& src, const WorldPosition& dest, Unit* jumper, float jumpSpeed, bool preSetLanding = false);
         static float CalculateJumpTime(float srcZ, float destZ, float vSpeed, float hSpeed, float distance);

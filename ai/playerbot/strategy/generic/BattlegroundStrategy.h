@@ -3,6 +3,17 @@
 
 namespace ai
 {
+    class ThornGorgeStrategy : public Strategy
+    {
+    public:
+        ThornGorgeStrategy(PlayerbotAI* ai) : Strategy(ai) {}
+        int GetType() override { return STRATEGY_TYPE_GENERIC; }
+        std::string getName() override { return "thorn gorge"; }
+    private:
+        void InitNonCombatTriggers(std::list<TriggerNode*>& triggers) override;
+        void InitCombatTriggers(std::list<TriggerNode*>& triggers) override;
+    };
+
     class BattlegroundStrategy : public Strategy
     {
     public:

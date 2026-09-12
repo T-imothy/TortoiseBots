@@ -39,7 +39,9 @@ bool CheckMountStateAction::Execute(Event& event)
     if (hasEnemy)
     {
         float distToTarget = AI_VALUE(Unit*, "current target") ? AI_VALUE2(float, "distance", "current target") : 0;
-        canAttackTarget = sServerFacade.IsDistanceLessThan(distToTarget, GetAttackDistance());
+        // Discovery without a selected victim is not an attack at zero yards.
+        canAttackTarget = AI_VALUE(Unit*, "current target") &&
+            sServerFacade.IsDistanceLessThan(distToTarget, GetAttackDistance());
         shouldChaseTarget = sServerFacade.IsDistanceGreaterThan(distToTarget, 45.0f) && AI_VALUE2(bool, "moving", "current target");
         farFromTarget = sServerFacade.IsDistanceGreaterThan(distToTarget, 40.0f);
     }
@@ -274,7 +276,7 @@ bool CheckMountStateAction::isUseful()
         return false;
 
     // Do not use with BG Flags, except forms like "Travel Form" and "Ghost Wolf"
-    if (bot->HasAura(23333) || bot->HasAura(23335))
+    if (bot->HasAura(23333) || bot->HasAura(23335) || bot->HasAura(59005))
 {
     if (!bot->HasSpell(783) && !bot->HasSpell(2645))
         return false;
@@ -309,7 +311,7 @@ bool CheckMountStateAction::CanMountInBg() const
     {
         BattleGroundWS* bg = (BattleGroundWS*)ai->GetBot()->GetBattleGround();
 
-        if (bot->HasAura(23333) || bot->HasAura(23335))
+        if (bot->HasAura(23333) || bot->HasAura(23335) || bot->HasAura(59005))
         {
             return false;
         }

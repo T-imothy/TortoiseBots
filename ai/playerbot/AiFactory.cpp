@@ -616,6 +616,7 @@ void AiFactory::AddDefaultCombatStrategies(Player* player, PlayerbotAI* const fa
         {
             combatEngine->addStrategy("alterac");
         }
+        if (bgType == BATTLEGROUND_TG) combatEngine->addStrategy("thorn gorge");
 
 
         combatEngine->addStrategies("boost", "racials", "default", "aoe", "dps assist", "pvp", NULL);
@@ -992,7 +993,7 @@ void AiFactory::AddDefaultNonCombatStrategies(Player* player, PlayerbotAI* const
 
         BattleGroundTypeId bgType = player->GetBattleGroundTypeId();
 
-        if (bgType <= BATTLEGROUND_AB) // Vanilla WSG, AV, and AB tactics
+        if (bgType <= BATTLEGROUND_AB || bgType == BATTLEGROUND_TG) // Supported native objectives
         {
             nonCombatEngine->addStrategy("battleground");
 
@@ -1004,6 +1005,7 @@ void AiFactory::AddDefaultNonCombatStrategies(Player* player, PlayerbotAI* const
 
             if (bgType == BATTLEGROUND_AB)
                 nonCombatEngine->addStrategy("arathi");
+            if (bgType == BATTLEGROUND_TG) nonCombatEngine->addStrategy("thorn gorge");
         }
     }
 

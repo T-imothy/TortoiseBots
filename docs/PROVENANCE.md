@@ -1524,3 +1524,31 @@ Local validation:
   ownership/settlement, native permissions/dispatch, trainer, SOAP and module
   taxi refresh. The whole-module Release build linked successfully. Runtime
   validation and the remaining migration behaviors are separate gates.
+
+### ManTech movement, Thorn and cached travel migration
+
+- Source repository: T-imothy/tortoise-wow.
+- Source baseline: 37aee50d6bfbf9194dd5e3c79a156d9bfcb4f569; preserved Thorn
+  behavior includes a80ca1d1 and its recorded predecessors.
+- Source files: legacy playerbot BattleGroundTactics/Strategy/Triggers,
+  FlagCarrierValue, MovementActions, RpgTaxiAction, CheckMountStateAction,
+  TravelNode and WorldPosition. License notices remain with source files.
+- Ported observable behavior: native Thorn objective/flag handling, travel mount
+  preparation, single-owner spline handoff, native taxi checks and cache geometry.
+  Queue integration and opt-in generation adapted to this module's services.
+- Host gap: explicit coordinate queries implemented in the core's existing
+  PathInfo rather than retaining no-op compatibility calls or copying a pathfinder.
+- Validation: selected-module carrier/mount/taxi/path/dispatch tests; native
+  coordinate paths with real Detour tiles; module generation/cost/cache tests.
+  Runtime gameplay and parallel scheduler acceptance remain outstanding.
+
+
+The same ManTech baseline supplies TryGroundTraversal and destination-scoped
+path-failure retry intent. The new module uses its existing jump physics,
+landing/collision checks and 64-bit transition generation; it does not inherit
+the retired BG-specific logger. GroundTraversalTest now executes the selected
+module; ModulePathRetryTest covers timer wrap and changed map/instance/epoch.
+Scheduler trait intent comes from baseline PlayerbotScripts; human proximity
+was corrected independently after tracing RandomBotFacade's bot-only roster.
+ModuleHumanInterestTest covers humans versus bots, instance/camera visibility,
+master/group responsiveness and network takeover.

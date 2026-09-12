@@ -79,3 +79,12 @@ All interaction between the module and core server passes through explicit adapt
 
 #### 5. Asynchronous LLM Isolation
 LLM-based chat interactions are purely asynchronous and decoupled. If an LLM backend times out or fails, combat AI, movement, healing, interrupts, and crowd control continue running with zero interruption or frame hitching.
+
+### Migration scheduler status (2026-09-12)
+
+The ManTech map scheduler consumes generic machine-driven/critical hooks from
+BotPlayerAdapter. Human-interest checks inspect network players on the owning
+map instance; the random-bot roster is not a human observer list. Classification
+is separate from execution ownership: the module's AI loop still executes on
+the world owner after maps join. Parallel AI dispatch remains pending a shared
+state/lifecycle audit; passing classification tests does not prove concurrency.

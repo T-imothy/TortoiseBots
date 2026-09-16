@@ -4,6 +4,7 @@
 #include "playerbot/AiFactory.h"
 #include "strategy/values/ItemUsageValue.h"
 #include <numeric>
+#include <mutex>
 #include <iomanip>
 #include <regex>
 #include <boost/algorithm/string.hpp>
@@ -38,6 +39,11 @@ static bool substrContainsInMap(const std::string& searchTerm, const std::map<st
 
 ChatHelper::ChatHelper(PlayerbotAI* ai) : PlayerbotAIAware(ai)
 {
+    // All helpers read the same immutable lookup tables. Publish them once,
+    // before any constructor returns, instead of rewriting them per bot.
+    static std::once_flag initialized;
+    std::call_once(initialized, []
+    {
     itemQualities["poor"] = ITEM_QUALITY_POOR;
     itemQualities["gray"] = ITEM_QUALITY_POOR;
     itemQualities["normal"] = ITEM_QUALITY_NORMAL;
@@ -197,6 +203,7 @@ ChatHelper::ChatHelper(PlayerbotAI* ai) : PlayerbotAIAware(ai)
         if (race && race->name[LOCALE_enUS])
             races[race->RaceID] = race->name[LOCALE_enUS];
     }
+    });
 }
 
 std::string ChatHelper::formatMoney(uint32 copper)

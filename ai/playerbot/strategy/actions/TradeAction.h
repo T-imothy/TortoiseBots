@@ -7,6 +7,7 @@ namespace ai
     class TradeAction : public ChatCommandAction
     {
     public:
+        bool RequiresWorldOwner() const override { return true; }
         TradeAction(PlayerbotAI* ai) : ChatCommandAction(ai, "trade") {}
         virtual bool Execute(Event& event) override;
 

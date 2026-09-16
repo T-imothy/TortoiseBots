@@ -84,7 +84,7 @@ namespace ai
                             continue;
 
                         if (member == bot) index = count;
-                        if (member && !ai->IsRanged(member) && !ai->IsTank(member)) count++;
+                        if (member && ai->IsSafe(member) && !ai->IsRanged(member) && !ai->IsTank(member)) count++;
                     }
                 }
 
@@ -98,7 +98,7 @@ namespace ai
             float angle = GetFollowAngle() + target->getOrientation();
 
             Player* master = GetMaster();
-            if (master)
+            if (master && ai->IsSafe(master))
                 angle -= master->getOrientation();
 
             return angle;
@@ -164,7 +164,7 @@ namespace ai
                     if (!ai->IsSafe(member))
                         continue;
                     if (member == bot) index = count;
-                    if (member && !ai->IsRanged(member) && !ai->IsTank(member)) count++;
+                    if (member && ai->IsSafe(member) && !ai->IsRanged(member) && !ai->IsTank(member)) count++;
                 }
             }
 

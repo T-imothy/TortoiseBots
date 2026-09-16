@@ -49,6 +49,8 @@ public:
 #endif
     virtual bool Execute(Event& event) override;
 private:
+    GameObject* PreviousAbObjective();
+    void RememberAbObjective(GameObject* objective);
     bool SelectAvObjectiveAlliance(WorldLocation& objectiveLocation);
     bool SelectAvObjectiveHorde(WorldLocation& objectiveLocation);
     bool moveToStart(bool force = false);
@@ -61,6 +63,7 @@ private:
     bool resetObjective();
     bool wsgPaths();
     bool wsgRoofJump();
+    bool CanAttemptAbCapture();
     bool atFlag(std::vector<BattleBotPath*> const& vPaths, std::vector<uint32> const& vFlagIds);
     bool CheckFlagAv();
     bool flagTaken();

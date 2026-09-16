@@ -139,7 +139,7 @@ namespace ai
 
         bool isOverworld() const { return mapId == 0 || mapId == 1 || mapId == 609; }
         bool IsOverworld() const { return isOverworld(); }
-        bool isBg() const { return mapId == 27 || mapId == 30 || mapId == 489 || mapId == 529; }
+        bool isBg() const;
         bool isInstance() const { return !isOverworld() || mapId == 609;}
         bool isInWater() const { return getTerrain() ? getTerrain()->IsInWater(x, y, z) : false; };
         bool isUnderWater() const { return getTerrain() ? getTerrain()->IsUnderWater(x, y, z) : false; };

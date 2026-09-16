@@ -402,8 +402,8 @@ namespace ai
             else
             {
                 WorldPosition relPos(bot);
-                relPos -= WorldPosition(ai->GetMaster());
-                relPos.rotateXY(-1 * ai->GetMaster()->getOrientation());
+                relPos -= WorldPosition(followTarget);
+                relPos.rotateXY(-1 * followTarget->getOrientation());
 
                 followPosition.Set(relPos.getX(), relPos.getY(), relPos.getZ(), relPos.GetMapId());
             }

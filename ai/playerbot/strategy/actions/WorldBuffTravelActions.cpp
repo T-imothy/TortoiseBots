@@ -1,4 +1,5 @@
 ﻿#include "playerbot/playerbot.h"
+#include "runtime/BotWorldActions.h"
 #include "WorldBuffTravelActions.h"
 #include "ChooseTravelTargetAction.h"
 #include "playerbot/TravelMgr.h"
@@ -253,15 +254,13 @@ bool WorldBuffTravelApplyAction::TrySummonFarAwayMembers(WorldBuffTravelStep ste
     if (!group)
         return false;
 
-    static std::map<ObjectGuid, time_t> lastSummonAttempt;
+    auto* summonTime = context->GetValue<time_t>("world buff summon time");
     time_t now = time(nullptr);
-    ObjectGuid botGuid = bot->getObjectGuid();
-    auto it = lastSummonAttempt.find(botGuid);
-    if (it != lastSummonAttempt.end() && now < it->second)
+    if (now < summonTime->Get())
         return true;
 
     uint32 cooldownSeconds = urand(1, 5);
-    lastSummonAttempt[botGuid] = now + cooldownSeconds;
+    summonTime->Set(now + cooldownSeconds);
 
     uint8 warlockStep = static_cast<uint8>(step);
     uint32 pendingCount = 0;
@@ -353,7 +352,7 @@ bool WorldBuffTravelApplyAction::TrySummonFarAwayMembers(WorldBuffTravelStep ste
         --remainingToSummon;
 
     if (!didSummon && pendingCount == 0 && remainingToSummon == 0)
-        lastSummonAttempt.erase(botGuid);
+        summonTime->Set(0);
 
     return didSummon || (remainingToSummon > 0) || (pendingCount > 0);
 }
@@ -477,6 +476,9 @@ void WorldBuffTravelApplyAction::AdvanceStep()
 
 bool WorldBuffTravelApplyAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
+
     uint8 rawStep = AI_VALUE(uint8, "world buff travel step");
     WorldBuffTravelStep step = static_cast<WorldBuffTravelStep>(rawStep);
 

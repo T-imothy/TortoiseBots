@@ -1,5 +1,6 @@
 #pragma once
 #include "playerbot/PlayerbotAI.h"
+#include "runtime/BotWorldActions.h"
 #include "playerbot/RandomBotFacade.h"
 #include "GenericActions.h"
 
@@ -8,10 +9,14 @@ namespace ai
     class LeaveGroupAction : public ChatCommandAction
     {
     public:
+        bool RequiresWorldOwner() const override { return true; }
         LeaveGroupAction(PlayerbotAI* ai, std::string name = "leave") : ChatCommandAction(ai, name) {}
 
         virtual bool Execute(Event& event) override
         {
+            if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+                return *deferred;
+
             Player* master = event.GetOwner();
 
             return Leave(master);
@@ -25,10 +30,14 @@ namespace ai
     class PartyCommandAction : public LeaveGroupAction
     {
     public:
+        bool RequiresWorldOwner() const override { return true; }
         PartyCommandAction(PlayerbotAI* ai) : LeaveGroupAction(ai, "party command") {}
 
         virtual bool Execute(Event& event) override
         {
+            if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+                return *deferred;
+
             WorldPacket& p = event.GetPacket();
             p.rpos(0);
             uint32 operation;
@@ -50,10 +59,14 @@ namespace ai
     class UninviteAction : public LeaveGroupAction
     {
     public:
+        bool RequiresWorldOwner() const override { return true; }
         UninviteAction(PlayerbotAI* ai) : LeaveGroupAction(ai, "uninvite") {}
 
         virtual bool Execute(Event& event) override
         {
+            if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+                return *deferred;
+
             WorldPacket& p = event.GetPacket();
 
             if (p.getOpcode() == CMSG_GROUP_UNINVITE)
@@ -89,10 +102,14 @@ namespace ai
     class LeaveFarAwayAction : public LeaveGroupAction
     {
     public:
+        bool RequiresWorldOwner() const override { return true; }
         LeaveFarAwayAction(PlayerbotAI* ai) : LeaveGroupAction(ai, "leave far away") {}
 
         virtual bool Execute(Event& event) override
         {
+            if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+                return *deferred;
+
             return Leave(ai->GetGroupMaster());
         }
 

@@ -1,6 +1,9 @@
 // pi-lens-ignore: clang:pp_file_not_found,clang:unknown_typename,clang:use_of_undeclared_identifier,clang:unknown_type_name,clang:undeclared_var_use,clang:incomplete_member_access,clang:uninitialized,clang:undefined_identifier,clang:undeclared_identifier,clang:all
 #include "PlayerbotAIAdapter.h"
 #include "BotManager.h"
+#include "BotWorldActions.h"
+#include "WorldSession.h"
+#include <atomic>
 #include "PlayerbotAIStorage.h"
 #include "playerbot/PlayerbotAI.h"
 #include "playerbot/AiFactory.h"
@@ -9,6 +12,7 @@
 #include "ObjectAccessor.h"
 #include "Player.h"
 #include "Log.h"
+#include "../host/ModuleLog.h"
 
 namespace TortoiseBots {
 
@@ -44,26 +48,46 @@ bool PlayerbotAIAdapter::Initialize()
     }
     PlayerbotAIStorage::Instance().SetAI(bot_, ai_); // pi-lens-ignore: clang:all
     initialized_ = true;
-    sLog.outString("TortoiseBots: PlayerbotAI attached for %s (%s) master %s", // pi-lens-ignore: clang:all
+    TB_LOG_DETAIL("TortoiseBots: PlayerbotAI attached for %s (%s) master %s", // pi-lens-ignore: clang:all
         bot_->GetName(), bot_->GetObjectGuid().GetString().c_str(), // pi-lens-ignore: clang:all
         master_ ? master_->GetName() : "none"); // pi-lens-ignore: clang:all
     return true;
 }
 
-void PlayerbotAIAdapter::Update(uint32_t diff)
+bool PlayerbotAIAdapter::CanUpdatePlayer(Player* player)
 {
-    if (!IsUsable()) return; // pi-lens-ignore: clang:all
+    if (!player || !player->IsInWorld() || !player->GetMap() || player->IsBeingTeleported() ||
+        !player->GetSession() || !player->GetSession()->IsHeadless())
+        return false;
+    PlayerbotAI* ai = PlayerbotAIStorage::Instance().GetAI(player);
+    return ai && ai->GetBot() == player && ai->GetAiObjectContext() &&
+        ai->GetCurrentEngine() && !ai->GetShouldLogOut();
+}
+
+void PlayerbotAIAdapter::UpdatePlayer(Player* player, uint32_t diff, bool minimal)
+{
+    if (!CanUpdatePlayer(player)) return;
+    // The core validates its GUID/map-generation snapshot before this call and
+    // joins the complete map batch before world teardown/teleport maintenance.
+    // No manager record iterator or adapter pointer crosses into map work.
+    PlayerbotAI* ai = PlayerbotAIStorage::Instance().GetAI(player);
+    BotWorldActions::MapScope mapOwner;
     try
     {
-        ai_->UpdateAI(diff); // pi-lens-ignore: clang:all
+        ai->UpdateAI(diff, minimal);
+        if (BotManager::Instance().IsPacketBridgeTestEnabled())
+        {
+            static std::atomic<bool> reported{false};
+            if (!reported.exchange(true))
+                sLog.outString("TortoiseBots: PacketBridgeTest native map AI PASSED");
+        }
     }
     catch (ByteBufferException const&)
     {
-        // Donor packet actions parse opcode-specific payloads. A malformed
-        // or host-variant packet must be dropped for this tick, never unwind
-        // through the world update and terminate mangosd.
+        // Preserve the native adapter's malformed-packet containment; remaining
+        // queued packets retain the existing per-AI retry/discard contract.
         sLog.outError("TortoiseBots: dropped malformed packet while updating bot %s",
-            bot_->GetName()); // pi-lens-ignore: clang:all
+            player->GetName());
     }
 }
 

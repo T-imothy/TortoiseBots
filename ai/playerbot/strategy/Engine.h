@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Action.h"
+#include <functional>
+#include <memory>
 #include "ActionFailureBackoff.h"
 #include "Queue.h"
 #include "Trigger.h"
@@ -57,7 +59,8 @@ namespace ai
         ACTION_RESULT_OK,
         ACTION_RESULT_IMPOSSIBLE,
         ACTION_RESULT_USELESS,
-        ACTION_RESULT_FAILED
+        ACTION_RESULT_FAILED,
+        ACTION_RESULT_DEFERRED
     };
 
     class Engine : public PlayerbotAIAware
@@ -78,7 +81,7 @@ namespace ai
 		bool ContainsStrategy(StrategyType type);
 		void ChangeStrategy(const std::string& names);
 		void PrintStrategies(Player* requester, const std::string& engineType);
-        std::string GetLastAction() { return lastAction; }
+        std::string GetLastAction() const { return lastAction; }
         const Action* GetLastExecutedAction() const { return lastExecutedAction; }
 
     public:
@@ -107,6 +110,9 @@ namespace ai
         bool MultiplyAndPush(NextAction** actions, float forceRelevance, bool skipPrerequisites, const Event& event, const char* pushType);
         bool MultiplyAndPush(const std::vector<NextAction>& actions, float forceRelevance, bool skipPrerequisites, const Event& event, const char* pushType);
         bool Reset();
+        bool ScheduleWorldContinuation(const Event& event, std::function<void(Engine&)> continuation);
+        bool WorldContinuationPending() const { return !pendingWorldDecision.expired(); }
+        void CancelWorldContinuation() { worldContinuationEpoch = std::make_shared<int>(0); pendingWorldDecision.reset(); }
         void ProcessTriggers(bool minimal);
         void PushDefaultActions();
         void PushAgain(ActionNode* actionNode, float relevance, const Event& event);
@@ -145,6 +151,8 @@ namespace ai
         ActionExecutionListeners actionExecutionListeners;
         BotState state;
         Action* lastExecutedAction;
+        std::shared_ptr<int> worldContinuationEpoch = std::make_shared<int>(0);
+        std::weak_ptr<int> pendingWorldDecision;
         bool inDoNextAction = false;
         bool reinitPending = false;
         // Issue #84 state. Per-engine failure memory plus the transition
@@ -152,6 +160,7 @@ namespace ai
         ActionFailureBackoff actionFailures;
         TransitionTracker transitions;
         float failX = 0.0f, failY = 0.0f, failZ = 0.0f;
+        uint64_t failureMapGeneration = 0;
         uint32_t failMoney = 0, failHealth = 0, failMana = 0;
 
     public:

@@ -1,3 +1,4 @@
+#include "runtime/BotWorldActions.h"
 
 #include "playerbot/playerbot.h"
 #include "UpdateGearAction.h"
@@ -13,6 +14,9 @@ UpdateGearAction::UpdateGearAction(PlayerbotAI* ai): Action(ai, "update gear")
 
 bool UpdateGearAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
+
     Player* requester = event.GetOwner() ? event.GetOwner() : GetMaster();
 
     // Get bot class and spec

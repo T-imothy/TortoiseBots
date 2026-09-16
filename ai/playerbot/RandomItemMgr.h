@@ -182,6 +182,7 @@ class RandomItemMgr
         std::vector<uint32> GetQuestIdsForItem(uint32 itemId);
         std::string GetPlayerSpecName(Player* player);
         uint32 GetPlayerSpecId(Player* player);
+        bool HasEquipmentCache() const { return !equipCache.empty(); }
     private:
         void BuildRandomItemCache();
         void BuildEquipCache();

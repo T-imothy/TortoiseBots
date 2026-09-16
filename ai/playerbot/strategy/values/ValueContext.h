@@ -3,6 +3,7 @@
 #include "playerbot/strategy/AiObjectContext.h"
 
 #include "ActiveSpellValue.h"
+#include "BattlegroundObjectiveValue.h"
 #include "NearestGameObjects.h"
 #include "LogLevelValue.h"
 #include "NearestNpcsValue.h"
@@ -171,6 +172,7 @@ namespace ai
             creators["mana"] = [](PlayerbotAI* ai) { return new ManaValue(ai); };
             creators["combo"] = [](PlayerbotAI* ai) { return new ComboPointsValue(ai); };
             creators["dead"] = [](PlayerbotAI* ai) { return new IsDeadValue(ai); };
+            creators["battleground objective memory"] = [](PlayerbotAI* ai) { return new BattlegroundObjectiveValue(ai); };
             creators["pet dead"] = [](PlayerbotAI* ai) { return new PetIsDeadValue(ai); };
             creators["pet happy"] = [](PlayerbotAI* ai) { return new PetIsHappyValue(ai); };
             creators["has mana"] = [](PlayerbotAI* ai) { return new HasManaValue(ai); };
@@ -230,6 +232,8 @@ namespace ai
             creators["position"] = [](PlayerbotAI* ai) { return new PositionValue(ai); };
             creators["pos"] = [](PlayerbotAI* ai) { return new SinglePositionValue(ai); };
             creators["current position"] = [](PlayerbotAI* ai) { return new CurrentPositionValue(ai); };
+            creators["master teleporting"] = [](PlayerbotAI* ai) { return new MasterTeleportingValue(ai); };
+            creators["master needs quest item"] = [](PlayerbotAI* ai) { return new MasterNeedsQuestItemValue(ai); };
             creators["master position"] = [](PlayerbotAI* ai) { return new MasterPositionValue(ai); };
             creators["custom position"] = [](PlayerbotAI* ai) { return new CustomPositionValue(ai); };
             creators["my threat"] = [](PlayerbotAI* ai) { return new MyThreatValue(ai); };
@@ -386,6 +390,8 @@ namespace ai
             creators["petition signs"] = [](PlayerbotAI* ai) { return new PetitionSignsValue(ai); };
             creators["can hand in petition"] = [](PlayerbotAI* ai) { return new CanHandInPetitionValue(ai); };
             creators["can buy tabard"] = [](PlayerbotAI* ai) { return new CanBuyTabard(ai); };
+            creators["guild missing reagents"] = [](PlayerbotAI* ai) { return new GuildMissingReagentsValue(ai); };
+            creators["guild motd"] = [](PlayerbotAI* ai) { return new GuildMotdValue(ai); };
             creators["guild order"] = [](PlayerbotAI* ai) { return new GuildOrderValue(ai); };
             creators["has guild travel order"] = [](PlayerbotAI* ai) { return new HasGuildTravelOrderValue(ai); };
             creators["has guild craft order"] = [](PlayerbotAI* ai) { return new HasGuildCraftOrderValue(ai); };
@@ -460,6 +466,7 @@ namespace ai
             creators["can open fishing dobber"] = [](PlayerbotAI* ai) { return new CanOpenFishingDobberValue(ai); };
             creators["done fishing"] = [](PlayerbotAI* ai) { return new DoneFishingValue(ai); };
             creators["world buff travel step"] = [](PlayerbotAI* ai) { return new WorldBuffTravelStepValue(ai); };
+            creators["world buff summon time"] = [](PlayerbotAI* ai) { return new WorldBuffSummonTimeValue(ai); };
 
             //Stuck
             creators["time since last change"] = [](PlayerbotAI* ai) { return new TimeSinceLastChangeValue(ai); };

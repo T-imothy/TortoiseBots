@@ -1,3 +1,4 @@
+#include "runtime/BotWorldActions.h"
 
 #include "playerbot/playerbot.h"
 #include "TradeAction.h"
@@ -8,6 +9,9 @@ using namespace ai;
 
 bool TradeAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
+
     std::string text = event.GetParam();
 
     if (!bot->GetTrader())

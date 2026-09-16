@@ -7,6 +7,7 @@ namespace ai
     class AhAction : public ChatCommandAction
     {
     public:
+        bool RequiresWorldOwner() const override { return true; }
         AhAction(PlayerbotAI* ai, std::string name = "ah") : ChatCommandAction(ai, name) {}
         virtual bool Execute(Event& event) override;
 

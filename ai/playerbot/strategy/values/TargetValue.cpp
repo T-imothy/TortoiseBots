@@ -50,7 +50,7 @@ bool FindNonCcTargetStrategy::IsCcTarget(Unit* attacker)
         for (Group::member_citerator itr = groupSlot.begin(); itr != groupSlot.end(); itr++)
         {
             Player *player = sObjectMgr.GetPlayer(itr->guid);
-            if (!player || !sServerFacade.IsAlive(player) || !ai->IsSafe(player))
+            if (!player || !ai->IsSafe(player) || !sServerFacade.IsAlive(player))
                 continue;
 
             if (PlayerbotAIStorage::Instance().GetAI(player))

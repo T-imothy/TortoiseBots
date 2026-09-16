@@ -1,4 +1,5 @@
 #pragma once
+#include "playerbot/strategy/WorldCalculatedValue.h"
 #include "playerbot/PlayerbotAI.h"
 #include "playerbot/strategy/AiObjectContext.h"
 #include "playerbot/strategy/Value.h"
@@ -181,5 +182,15 @@ namespace ai
 
         virtual std::string Save() override { return (uint8)value ? std::to_string((uint8)value) : "?"; }
         virtual bool Load(std::string force) override { if (!force.empty()) value = ForceItemUsage(stoi(force)); return !force.empty(); }
+    };
+    class MasterNeedsQuestItemValue : public WorldCalculatedValue<bool>, public Qualified
+    {
+    public:
+        MasterNeedsQuestItemValue(PlayerbotAI* ai) : WorldCalculatedValue<bool>(ai, "master needs quest item", 2) {}
+        bool Calculate() override
+        {
+            Player* master = GetMaster();
+            return master && ItemUsageValue::IsNeededForQuest(master, uint32(strtoul(getQualifier().c_str(), nullptr, 10)));
+        }
     };
 }

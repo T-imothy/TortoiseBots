@@ -4,9 +4,8 @@
 Pins structural properties of Engine::DoNextAction that unit tests over
 ActionFailureBackoff cannot see (it is pure policy math):
 
-P1: the backoff gate must run BEFORE prerequisite expansion and the
-    possibility check, so a backing-off action (including one whose
-    isPossible() is false) costs no work and extends no deadline.
+P1: preserve ManTech prerequisite and possibility evaluation before delaying
+    repeated failed background execution. Alternatives remain eligible.
 P2: tick start must consult the module-owned transition tracker and drain
     the queue on arrival/map-change/jump; the walk must stop mid Stride on
     teleport.
@@ -31,26 +30,27 @@ def walk_body():
 
 
 class WalkGatingTest(unittest.TestCase):
-    def test_backoff_gate_before_prerequisites(self):
+    def test_backoff_gate_after_prerequisites(self):
         body = walk_body()
         gate = body.index("IsFailureBackedOff(action, event)")
         prereq = body.index("getPrerequisites()")
-        self.assertLess(gate, prereq,
-                        "backoff gate must precede prerequisite expansion (P1)")
+        self.assertGreater(gate, prereq,
+                        "backoff gate must follow prerequisite expansion (P1)")
 
-    def test_backoff_gate_before_possibility_check(self):
+    def test_backoff_gate_after_possibility_check(self):
         body = walk_body()
         gate = body.index("IsFailureBackedOff(action, event)")
         possible = body.index("action->isPossible()")
-        self.assertLess(gate, possible,
-                        "backoff gate must precede isPossible() (P1)")
+        self.assertGreater(gate, possible,
+                        "backoff gate must follow isPossible() (P1)")
 
-    def test_backed_off_action_drops_without_alternatives(self):
+    def test_backed_off_action_preserves_alternatives(self):
         body = walk_body()
         gate = body.index("IsFailureBackedOff(action, event)")
         window = body[gate:gate + 800]
-        self.assertIn("delete actionNode", window)
-        self.assertNotIn("getAlternatives()", window)
+        self.assertIn("std::unique_ptr<ActionNode> actionNode(queue.Pop())", body)
+        self.assertIn("continue;", window)
+        self.assertIn("getAlternatives()", window)
 
     def test_tick_start_tracks_transitions_and_drains(self):
         body = walk_body()

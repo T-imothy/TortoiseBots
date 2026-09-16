@@ -162,14 +162,14 @@ namespace ai
         ShouldDrinkValue(PlayerbotAI* ai) : BoolCalculatedValue(ai, "should drink", 2) {}
         virtual bool Calculate() override
         {
-            if (!bot->GetPower(POWER_MANA) > 0)
+            if (!bot->GetPower(POWER_MANA))
                 return false;
 
             if (AI_VALUE2(uint8, "mana", "self target") >= 85)
                 return false;
 
             Player* master = ai->GetMaster();
-            if (!master)
+            if (!master || !ai->IsSafe(master))
                 return true;
 
             if (!bot->GetGroup())
@@ -208,7 +208,7 @@ namespace ai
                 return false;
 
             Player* master = ai->GetMaster();
-            if (!master)
+            if (!master || !ai->IsSafe(master))
                 return true;
 
             if (!bot->GetGroup())
@@ -249,7 +249,7 @@ namespace ai
             float multiplier = bot->InBattleGround() ? 20000.0f : 27000.0f;
             float drinkDuration = multiplier * (mpMissingPct / 100.0f);
 
-            if (!master)
+            if (!master || !ai->IsSafe(master))
                 return drinkDuration;
 
             if (!bot->GetGroup())
@@ -294,7 +294,7 @@ namespace ai
             float multiplier = bot->InBattleGround() ? 20000.0f : 27000.0f;
             float eatDuration = multiplier * (hpMissingPct / 100.0f);
 
-            if (!master)
+            if (!master || !ai->IsSafe(master))
                 return eatDuration;
 
             if (!bot->GetGroup())

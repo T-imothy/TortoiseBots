@@ -1,5 +1,6 @@
 
 #include "playerbot/playerbot.h"
+#include "runtime/BotWorldActions.h"
 #include "playerbot/PerformanceMonitor.h"
 #include "AhAction.h"
 #include "host/AuctionHouseAdapter.h"
@@ -23,6 +24,9 @@ uint32 AuctionItemCount(AuctionEntry const* auction)
 
 bool AhAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
+
     Player* requester = event.GetOwner() ? event.GetOwner() : GetMaster();
     std::string text = event.GetParam();
 
@@ -33,14 +37,10 @@ bool AhAction::Execute(Event& event)
         if (!npc)
             continue;
 
-        if (!sRandomBotFacade.m_ahActionMutex.try_lock()) //Another bot is using the Auction right now. Try again later.
+        std::unique_lock<std::mutex> auctionLock(sRandomBotFacade.m_ahActionMutex, std::try_to_lock);
+        if (!auctionLock.owns_lock())
             return false;
-
-        bool doneAuction = ExecuteCommand(requester, text, npc);
-
-        sRandomBotFacade.m_ahActionMutex.unlock();
-
-        return doneAuction;
+        return ExecuteCommand(requester, text, npc);
     }
 
     ai->TellPlayerNoFacing(requester, "Cannot find auctioneer nearby");

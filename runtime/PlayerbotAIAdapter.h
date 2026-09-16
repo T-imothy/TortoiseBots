@@ -29,8 +29,9 @@ public:
     // Called once per Headless bot when it enters world (BotManager::InWorld)
     bool Initialize();
 
-    // Called every world tick (BotManager::Update) — drives Engine::DoNextAction
-    void Update(uint32_t diff);
+    // Existing native map hooks own admission and the player lifetime barrier.
+    static bool CanUpdatePlayer(Player* player);
+    static void UpdatePlayer(Player* player, uint32_t diff, bool minimal);
 
     // Rebind only the live master pointer. Mature PlayerbotAI strategies are
     // authoritative across reconnect; the native adapter does not reconstruct

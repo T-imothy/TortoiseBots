@@ -19,7 +19,7 @@ namespace TortoiseBots
 // team, hardcore, group, state, and AiFactory spec role before QueuePlayer.
 // Native core owns offers, acceptance, cancellation, and group formation; the
 // service auto-accepts only its own Headless participants. Unknown dungeon ranges
-// fail closed. No second queue, DB tick, addon protocol, or role hook.
+// fail closed. No second queue, DB tick or addon protocol; existing native role hooks are reused.
 class LftBotFillService
 {
 public:
@@ -38,6 +38,7 @@ private:
     LftBotFillService() = default;
     ~LftBotFillService() = default;
 
+    bool CanFillQueue() const;
     bool IsEligibleCandidate(Player* bot) const;
     uint8 GetBotRoleMask(Player const* bot) const;
     bool IsModuleOwnedHeadlessBot(Player const* bot) const;

@@ -72,7 +72,7 @@ DEAD_FILES = (
 )
 
 def is_dead(ref):
-    base = ref.rsplit('/', 1)[-1]
+    base = ref.replace('\\', '/').rsplit('/', 1)[-1]
     return base in DEAD_FILES
 
 
@@ -102,7 +102,7 @@ def main():
             text = path.read_text(encoding='utf-8', errors='replace')
         except OSError:
             continue
-        rel = str(path.relative_to(ROOT))
+        rel = path.relative_to(ROOT).as_posix()
         for m in TRIGGERS.finditer(text):
             queued.setdefault(('trigger', base(m.group(1))), set()).add(rel)
         for m in ACTIONS.finditer(text):
@@ -148,7 +148,7 @@ def main():
     # trees do not fail the gate.
     node_broken = {}
     for path in sorted((ROOT / 'ai').rglob('*.cpp')) + sorted((ROOT / 'ai').rglob('*.h')):
-        rel = str(path.relative_to(ROOT))
+        rel = path.relative_to(ROOT).as_posix()
         if is_dead(rel):
             continue
         try:

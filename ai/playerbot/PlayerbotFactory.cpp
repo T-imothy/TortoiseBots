@@ -23,21 +23,20 @@ namespace
 {
 std::vector<std::pair<uint32, uint32>> const& CollectionMounts()
 {
-    static std::vector<std::pair<uint32, uint32>> mounts;
-    static bool loaded = false;
-    if (loaded)
-        return mounts;
-
-    loaded = true;
-    std::unique_ptr<QueryResult> result(WorldDatabase.Query("SELECT itemId, spellId FROM collection_mount"));
-    if (!result)
-        return mounts;
-
-    do
+    static const auto mounts = []
     {
-        Field* fields = result->Fetch();
-        mounts.emplace_back(fields[0].GetUInt32(), fields[1].GetUInt32());
-    } while (result->NextRow());
+        std::vector<std::pair<uint32, uint32>> resultMounts;
+        std::unique_ptr<QueryResult> result(WorldDatabase.Query("SELECT itemId, spellId FROM collection_mount"));
+        if (result)
+        {
+            do
+            {
+                Field* fields = result->Fetch();
+                resultMounts.emplace_back(fields[0].GetUInt32(), fields[1].GetUInt32());
+            } while (result->NextRow());
+        }
+        return resultMounts;
+    }();
 
     return mounts;
 }
@@ -153,7 +152,7 @@ void PlayerbotFactory::Prepare()
 
     if (!sPlayerbotAIConfig.disableRandomLevels)
     {
-        bot->SetLevel(level);
+        bot->GiveLevel(level);
         //Reset xp and xp for next level.
         bot->SetUInt32Value(PLAYER_XP, 0);
         bot->SetUInt32Value(PLAYER_NEXT_LEVEL_XP, sObjectMgr.getXPForLevel(level));
@@ -1487,7 +1486,7 @@ bool PlayerbotFactory::SelectPremadeSpecNo()
         }
     }
 
-    sLog.outBasic("SPECROLL: factory picked %s for class %u (%u paths, weight %u)",
+    sLog.outDetail("SPECROLL: factory picked %s for class %u (%u paths, weight %u)",
         chosen->name.c_str(), uint32(cls), uint32(paths.size()), totalProbability);
 
     sRandomBotFacade.SetValue(bot, "specNo", chosen->id + 1);
@@ -1867,10 +1866,23 @@ void PlayerbotFactory::InitEquipment(bool incremental, bool syncWithMaster, bool
     // runs before the specId guard). Level 5 aligns with AcceptQuestAction's breadcrumb gate.
     if (bot->GetLevel() < 5)
     {
-        sLog.outDetail("Bot #%d <%s> lvl %d: InitEquipment skipped (below level 5)",
-            bot->GetGUIDLow(), bot->GetName(), bot->GetLevel());
+        // Restore the core's race/class starter outfit if an earlier empty-
+        // cache initialization stripped it. Preserve all existing equipment.
+        if (!bot->GetItemByPos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_MAINHAND))
+            if (PlayerInfo const* info = sObjectMgr.GetPlayerInfo(bot->GetRace(), bot->GetClass()))
+                for (auto const& item : info->item)
+                {
+                    ItemPrototype const* proto = sObjectMgr.GetItemPrototype(item.item_id);
+                    if (proto && (proto->Class == ITEM_CLASS_WEAPON || proto->Class == ITEM_CLASS_ARMOR) &&
+                        !bot->HasItemCount(item.item_id, 1))
+                        bot->StoreNewItemInBestSlots(item.item_id, item.item_amount);
+                }
         return;
     }
+
+    // Never erase equipped items when the source cache is unavailable.
+    if (!sRandomItemMgr.HasEquipmentCache())
+        return;
 
     uint32 oldGS = ai->GetEquipGearScore(bot, false, false);
     uint32 masterGS = 0;
@@ -2628,7 +2640,9 @@ void PlayerbotFactory::InitTradeSkills()
 
         if (firstSkills.empty() || secondSkills.empty())
         {
-            switch (urand(0, 6))
+            // Four pairs below: (0, 6) left three casters in seven without any profession
+            // (firstSkill and secondSkill stayed 0, SetRandomSkill(0) is a no-op).
+            switch (urand(0, 3))
             {
             case 0:
                 firstSkill = SKILL_HERBALISM;
@@ -3151,7 +3165,9 @@ void PlayerbotFactory::InitQuests(std::list<uint32>& questMap)
 void PlayerbotFactory::ClearInventory()
 {
     DestroyItemsVisitor visitor(bot);
-    IterateItemsMask mask = IterateItemsMask((uint8)IterateItemsMask::ITERATE_ITEMS_IN_BAGS | (uint8)IterateItemsMask::ITERATE_ITEMS_IN_EQUIP);
+    IterateItemsMask mask = IterateItemsMask::ITERATE_ITEMS_IN_BAGS;
+    if (bot->GetLevel() >= 5)
+        mask = IterateItemsMask((uint8)mask | (uint8)IterateItemsMask::ITERATE_ITEMS_IN_EQUIP);
     ai->InventoryIterateItems(&visitor, mask);
 }
 

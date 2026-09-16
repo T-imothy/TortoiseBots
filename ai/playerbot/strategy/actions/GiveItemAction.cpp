@@ -1,3 +1,5 @@
+#include "runtime/BotWorldActions.h"
+#include "runtime/NativeGuildTrades.h"
 
 #include "playerbot/playerbot.h"
 #include "GiveItemAction.h"
@@ -10,51 +12,24 @@ std::vector<std::string> split(const std::string &s, char delim);
 
 bool GiveItemAction::Execute(Event& event)
 {
-    Player* requester = event.GetOwner() ? event.GetOwner() : GetMaster();
-    Unit* target = GetTarget();
-    if (!target) return false;
-
-    Player* receiver = dynamic_cast<Player*>(target);
-    if (!receiver) return false;
-
-    PlayerbotAI *receiverAi = PlayerbotAIStorage::Instance().GetAI(receiver);
-    if (!receiverAi)
-        return false;
-
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
+    Player* receiver = dynamic_cast<Player*>(GetTarget());
+    if (!receiver || !ai->IsSafe(receiver)) return false;
+    PlayerbotAI* receiverAi = PlayerbotAIStorage::Instance().GetAI(receiver);
+    if (!receiverAi) return false;
     if (receiverAi->GetAiObjectContext()->GetValue<uint32>("item count", item)->Get())
         return true;
-
-    bool moved = false;
-    std::list<Item*> items = ai->InventoryParseItems(item, IterateItemsMask::ITERATE_ITEMS_IN_BAGS);
-    for (std::list<Item*>::iterator j = items.begin(); j != items.end(); j++)
+    for (Item* gift : ai->InventoryParseItems(item, IterateItemsMask::ITERATE_ITEMS_IN_BAGS))
     {
-        Item* item = *j;
-
-        if (receiver->CanUseItem(item->GetProto()) != EQUIP_ERR_OK)
+        if (receiver->CanUseItem(gift->GetProto()) != EQUIP_ERR_OK)
             continue;
-
-        ItemPosCountVec dest;
-        InventoryResult msg = receiver->CanStoreItem(NULL_BAG, NULL_SLOT, dest, item, false);
-        if (msg == EQUIP_ERR_OK)
-        {
-            bot->MoveItemFromInventory(item->GetBagSlot(), item->GetSlot(), true);
-            item->SetOwnerGuid(target->getObjectGuid());
-            receiver->MoveItemToInventory(dest, item, true);
-            moved = true;
-
-            std::ostringstream out;
-            out << "Got " << chat->formatItem(item, item->GetCount()) << " from " << bot->GetName();
-            receiverAi->TellPlayerNoFacing(requester, out.str(), PlayerbotSecurityLevel::PLAYERBOT_SECURITY_ALLOW_ALL, false);
-        }
-        else
-        {
-            std::ostringstream out;
-            out << "Cannot get " << chat->formatItem(item, item->GetCount()) << " from " << bot->GetName() << "- my bags are full";
-            receiverAi->TellPlayerNoFacing(requester, out.str());
-        }
+        // Native trade retains conjured-item metadata, range/faction rules and
+        // both inventories' persistence. Admission is not a completion message.
+        if (TortoiseBots::NativeGuildTrades::OfferParty(bot, receiver, gift, gift->GetCount()))
+            return true;
     }
-
-    return true;
+    return false;
 }
 
 Unit* GiveItemAction::GetTarget()

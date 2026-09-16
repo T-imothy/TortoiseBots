@@ -21,15 +21,15 @@ TortoiseBots Module (C++)
 Go Observability Daemon (tools/observability)
     │
     ├──► Prometheus Metrics HTTP Endpoint (/metrics)
-    ├──► REST API (/api/state, /api/issues)
-    └──► WebSocket (/ws) -> Embedded Web SPA Dashboard (:8080)
+    ├──► REST API (/api/v1/status, /api/v1/issues)
+    └──► WebSocket (/api/v1/stream) -> Embedded Web SPA Dashboard (:8095)
 ```
 
 ---
 
 ## 1. Web Dashboard Features
 
-When the daemon is running, opening `http://localhost:8080` in your browser provides:
+When the daemon is running, opening `http://127.0.0.1:8095/dashboard` in your browser provides:
 - **2D World Map:** Live rendering of Kalimdor and Eastern Kingdoms with continent tabs, zone chips, and real-time bot position markers.
 - **Roster & Health Overview:** Real-time list of all active bots, class icons, current levels, health/mana percentages, and target units.
 - **Macro-State Breakdown:** Fleet-wide visualization showing how many bots are currently fighting, resting, traveling, looting, or dead.
@@ -54,17 +54,21 @@ You can run the daemon directly or via Docker:
 #### Direct Go Run:
 ```bash
 cd tools/observability
-go run cmd/server/main.go --http-port 8080 --udp-port 9195
+go run ./cmd/server --http-host 127.0.0.1 --http-port 8095 --udp-port 9195
 ```
 
 #### Via Docker Compose:
 If using containerized deployment (e.g. Docker Compose runtime), ensure the `observability` service container is running.
 
+### Trusted local automatic GM sign-in
+
+The dashboard normally requires a Game Master account from the configured login database. For a single-PC installation only, set `AUTO_LOGIN_USER` and `AUTO_LOGIN_PASSWORD` in the daemon environment before starting it. The daemon validates that account against `DB_LOGIN` at startup and periodically afterward, requires GM rank 3 or higher, and issues its usual signed session cookie automatically to loopback requests. It refuses automatic sign-in unless HTTP is bound to `127.0.0.1`. Keep the credentials outside the web document root; do not enable this mode on a public service.
+
 ---
 
 ## 3. Prometheus Metrics Endpoint
 
-The daemon exports Prometheus metrics at `http://localhost:8080/metrics`, allowing you to visualize bot performance in Grafana:
+The daemon exports Prometheus metrics at `http://127.0.0.1:8095/metrics`, allowing you to visualize bot performance in Grafana:
 - `tortoise_bots_active_total`: Number of active bots by faction and class.
 - `tortoise_bots_state_count`: Total bots in combat, travel, dead, or resting states.
 - `tortoise_bots_issues_active`: Number of unresolved stuck episodes.

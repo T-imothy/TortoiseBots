@@ -2,6 +2,9 @@
 #include "playerbot/playerbot.h"
 #include "playerbot/PlayerbotAIConfig.h"
 #include "RandomItemMgr.h"
+#include "ItemCacheLookup.h"
+
+using TortoiseBots::LookupItemCache;
 #include "playerbot/PlayerbotAI.h"
 
 #include "Database/DBCStore.h"
@@ -138,10 +141,10 @@ bool RandomItemMgr::HandleConsoleCommand(ChatHandler* handler, char const* args)
 
 RandomItemList RandomItemMgr::Query(uint32 level, RandomItemType type, RandomItemPredicate* predicate)
 {
-    RandomItemList &list = randomItemCache[(level - 1) / 10][type];
+    RandomItemList const& list = LookupItemCache(LookupItemCache(randomItemCache, (level - 1) / 10), type);
 
     RandomItemList result;
-    for (RandomItemList::iterator i = list.begin(); i != list.end(); ++i)
+    for (RandomItemList::const_iterator i = list.begin(); i != list.end(); ++i)
     {
         uint32 itemId = *i;
         ItemPrototype const* proto = sObjectMgr.GetItemPrototype(itemId);
@@ -192,11 +195,8 @@ void RandomItemMgr::BuildRandomItemCache()
             sLog.outErrorDb("TortoiseBots: ai_playerbot_rnditem_cache is missing; skipping optional cache generation");
             return;
         }
-        if (cacheCount->Fetch()->GetUInt32() == 0)
-        {
-            sLog.outString("Random item cache is present but empty; skipping optional cache generation");
-            return;
-        }
+        // A valid empty schema needs its first native cache build. Skipping
+        // this leaves the equipment/random-item consumers permanently empty.
 
         sLog.outString("Building random item cache from %u items", sItemStorage.GetMaxEntry());
         for (uint32 itemId = 0; itemId < sItemStorage.GetMaxEntry(); ++itemId)
@@ -282,7 +282,7 @@ bool RandomItemMgr::CanEquipItem(BotEquipKey key, ItemPrototype const* proto)
     if (proto->Class == ITEM_CLASS_CONTAINER)
         return true;
 
-    std::set<InventoryType> slots = viableSlots[(EquipmentSlots)key.slot];
+    std::set<InventoryType> slots = LookupItemCache(viableSlots, (EquipmentSlots)key.slot);
     if (slots.find((InventoryType)proto->InventoryType) == slots.end())
         return false;
 
@@ -312,7 +312,7 @@ bool RandomItemMgr::CanEquipItemNew(ItemPrototype const* proto)
     bool properSlot = false;
     for (std::map<EquipmentSlots, std::set<InventoryType> >::iterator i = viableSlots.begin(); i != viableSlots.end(); ++i)
     {
-        std::set<InventoryType> slots = viableSlots[(EquipmentSlots)i->first];
+        std::set<InventoryType> slots = LookupItemCache(viableSlots, (EquipmentSlots)i->first);
         if (slots.find((InventoryType)proto->InventoryType) != slots.end())
             properSlot = true;
     }
@@ -384,7 +384,7 @@ bool RandomItemMgr::ShouldEquipArmorForSpec(uint8 playerclass, uint8 spec, ItemP
     if (proto->InventoryType == INVTYPE_TABARD)
         return true;
 
-    if (!m_weightScales[spec].info.id)
+    if (!LookupItemCache(m_weightScales, spec).info.id)
         return false;
 
     std::unordered_set<uint32> resultArmorSubClass = { ITEM_SUBCLASS_ARMOR_CLOTH };
@@ -396,7 +396,7 @@ bool RandomItemMgr::ShouldEquipArmorForSpec(uint8 playerclass, uint8 spec, ItemP
         if (proto->InventoryType == INVTYPE_HOLDABLE)
             return false;
 
-        if (m_weightScales[spec].info.name == "arms" || m_weightScales[spec].info.name == "fury")
+        if (LookupItemCache(m_weightScales, spec).info.name == "arms" || LookupItemCache(m_weightScales, spec).info.name == "fury")
         {
             resultArmorSubClass = { ITEM_SUBCLASS_ARMOR_LEATHER, ITEM_SUBCLASS_ARMOR_MAIL, ITEM_SUBCLASS_ARMOR_PLATE };
         }
@@ -406,10 +406,10 @@ bool RandomItemMgr::ShouldEquipArmorForSpec(uint8 playerclass, uint8 spec, ItemP
     }
     case CLASS_PALADIN:
     {
-        if (m_weightScales[spec].info.name != "holy" && proto->InventoryType == INVTYPE_HOLDABLE)
+        if (LookupItemCache(m_weightScales, spec).info.name != "holy" && proto->InventoryType == INVTYPE_HOLDABLE)
             return false;
 
-        if (m_weightScales[spec].info.name != "holy")
+        if (LookupItemCache(m_weightScales, spec).info.name != "holy")
             resultArmorSubClass = { ITEM_SUBCLASS_ARMOR_MAIL, ITEM_SUBCLASS_ARMOR_PLATE , ITEM_SUBCLASS_ARMOR_LIBRAM };
         else
             resultArmorSubClass = { ITEM_SUBCLASS_ARMOR_CLOTH, ITEM_SUBCLASS_ARMOR_LEATHER, ITEM_SUBCLASS_ARMOR_MAIL, ITEM_SUBCLASS_ARMOR_PLATE, ITEM_SUBCLASS_ARMOR_LIBRAM };
@@ -438,10 +438,10 @@ bool RandomItemMgr::ShouldEquipArmorForSpec(uint8 playerclass, uint8 spec, ItemP
     }
     case CLASS_SHAMAN:
     {
-        if (m_weightScales[spec].info.name == "enhance" && proto->InventoryType == INVTYPE_HOLDABLE)
+        if (LookupItemCache(m_weightScales, spec).info.name == "enhance" && proto->InventoryType == INVTYPE_HOLDABLE)
             return false;
 
-        if (m_weightScales[spec].info.name == "enhance")
+        if (LookupItemCache(m_weightScales, spec).info.name == "enhance")
             resultArmorSubClass = { ITEM_SUBCLASS_ARMOR_TOTEM, ITEM_SUBCLASS_ARMOR_LEATHER, ITEM_SUBCLASS_ARMOR_MAIL };
         else
             resultArmorSubClass = { ITEM_SUBCLASS_ARMOR_TOTEM, ITEM_SUBCLASS_ARMOR_CLOTH, ITEM_SUBCLASS_ARMOR_LEATHER, ITEM_SUBCLASS_ARMOR_MAIL };
@@ -455,10 +455,10 @@ bool RandomItemMgr::ShouldEquipArmorForSpec(uint8 playerclass, uint8 spec, ItemP
     }
     case CLASS_DRUID:
     {
-        if ((m_weightScales[spec].info.name == "feraltank" || m_weightScales[spec].info.name == "feraldps") && proto->InventoryType == INVTYPE_HOLDABLE)
+        if ((LookupItemCache(m_weightScales, spec).info.name == "feraltank" || LookupItemCache(m_weightScales, spec).info.name == "feraldps") && proto->InventoryType == INVTYPE_HOLDABLE)
             return false;
 
-        if (m_weightScales[spec].info.name == "feraltank" || m_weightScales[spec].info.name == "feraldps")
+        if (LookupItemCache(m_weightScales, spec).info.name == "feraltank" || LookupItemCache(m_weightScales, spec).info.name == "feraldps")
             resultArmorSubClass = { ITEM_SUBCLASS_ARMOR_IDOL, ITEM_SUBCLASS_ARMOR_LEATHER };
         else
             resultArmorSubClass = { ITEM_SUBCLASS_ARMOR_IDOL, ITEM_SUBCLASS_ARMOR_CLOTH, ITEM_SUBCLASS_ARMOR_LEATHER };
@@ -529,7 +529,7 @@ bool RandomItemMgr::ShouldEquipWeaponForSpec(uint8 playerclass, uint8 spec, Item
     EquipmentSlots slot_rh = EQUIPMENT_SLOT_START;
     for (std::map<EquipmentSlots, std::set<InventoryType> >::iterator i = viableSlots.begin(); i != viableSlots.end(); ++i)
     {
-        std::set<InventoryType> slots = viableSlots[(EquipmentSlots)i->first];
+        std::set<InventoryType> slots = LookupItemCache(viableSlots, (EquipmentSlots)i->first);
         if (slots.find((InventoryType)proto->InventoryType) != slots.end())
         {
             if (i->first == EQUIPMENT_SLOT_MAINHAND)
@@ -544,7 +544,7 @@ bool RandomItemMgr::ShouldEquipWeaponForSpec(uint8 playerclass, uint8 spec, Item
     if (slot_mh == EQUIPMENT_SLOT_START && slot_oh == EQUIPMENT_SLOT_START && slot_rh == EQUIPMENT_SLOT_START)
         return false;
 
-    if (!m_weightScales[spec].info.id)
+    if (!LookupItemCache(m_weightScales, spec).info.id)
         return false;
 
     std::unordered_set<uint32> mh_weapons;
@@ -555,13 +555,13 @@ bool RandomItemMgr::ShouldEquipWeaponForSpec(uint8 playerclass, uint8 spec, Item
     {
     case CLASS_WARRIOR:
     {
-        if (m_weightScales[spec].info.name == "prot")
+        if (LookupItemCache(m_weightScales, spec).info.name == "prot")
         {
             mh_weapons = { ITEM_SUBCLASS_WEAPON_SWORD, ITEM_SUBCLASS_WEAPON_AXE, ITEM_SUBCLASS_WEAPON_MACE, ITEM_SUBCLASS_WEAPON_DAGGER, ITEM_SUBCLASS_WEAPON_FIST };
             oh_weapons = { ITEM_SUBCLASS_ARMOR_SHIELD };
             r_weapons = { ITEM_SUBCLASS_WEAPON_BOW, ITEM_SUBCLASS_WEAPON_CROSSBOW, ITEM_SUBCLASS_WEAPON_GUN };
         }
-        else if (m_weightScales[spec].info.name == "arms")
+        else if (LookupItemCache(m_weightScales, spec).info.name == "arms")
         {
             mh_weapons = { ITEM_SUBCLASS_WEAPON_SWORD2, ITEM_SUBCLASS_WEAPON_AXE2, ITEM_SUBCLASS_WEAPON_MACE2, ITEM_SUBCLASS_WEAPON_POLEARM };
             r_weapons = { ITEM_SUBCLASS_WEAPON_BOW, ITEM_SUBCLASS_WEAPON_CROSSBOW, ITEM_SUBCLASS_WEAPON_GUN };
@@ -576,13 +576,13 @@ bool RandomItemMgr::ShouldEquipWeaponForSpec(uint8 playerclass, uint8 spec, Item
     }
     case CLASS_PALADIN:
     {
-        if (m_weightScales[spec].info.name == "prot")
+        if (LookupItemCache(m_weightScales, spec).info.name == "prot")
         {
             mh_weapons = { ITEM_SUBCLASS_WEAPON_SWORD, ITEM_SUBCLASS_WEAPON_AXE, ITEM_SUBCLASS_WEAPON_MACE };
             oh_weapons = { ITEM_SUBCLASS_ARMOR_SHIELD };
             r_weapons = { ITEM_SUBCLASS_ARMOR_LIBRAM };
         }
-        else if (m_weightScales[spec].info.name == "holy")
+        else if (LookupItemCache(m_weightScales, spec).info.name == "holy")
         {
             mh_weapons = { ITEM_SUBCLASS_WEAPON_SWORD, ITEM_SUBCLASS_WEAPON_AXE, ITEM_SUBCLASS_WEAPON_MACE };
             oh_weapons = { ITEM_SUBCLASS_ARMOR_SHIELD, ITEM_SUBCLASS_ARMOR_MISC };
@@ -603,12 +603,12 @@ bool RandomItemMgr::ShouldEquipWeaponForSpec(uint8 playerclass, uint8 spec, Item
     }
     case CLASS_ROGUE:
     {
-        if (m_weightScales[spec].info.name == "assas")
+        if (LookupItemCache(m_weightScales, spec).info.name == "assas")
         {
             mh_weapons = { ITEM_SUBCLASS_WEAPON_DAGGER };
             oh_weapons = { ITEM_SUBCLASS_WEAPON_DAGGER };
         }
-        else if (m_weightScales[spec].info.name == "combat")
+        else if (LookupItemCache(m_weightScales, spec).info.name == "combat")
         {
             mh_weapons = { ITEM_SUBCLASS_WEAPON_SWORD, ITEM_SUBCLASS_WEAPON_MACE };
             oh_weapons = { ITEM_SUBCLASS_WEAPON_SWORD, ITEM_SUBCLASS_WEAPON_MACE };
@@ -631,13 +631,13 @@ bool RandomItemMgr::ShouldEquipWeaponForSpec(uint8 playerclass, uint8 spec, Item
     }
     case CLASS_SHAMAN:
     {
-        if (m_weightScales[spec].info.name == "resto")
+        if (LookupItemCache(m_weightScales, spec).info.name == "resto")
         {
             mh_weapons = { ITEM_SUBCLASS_WEAPON_STAFF, ITEM_SUBCLASS_WEAPON_DAGGER, ITEM_SUBCLASS_WEAPON_AXE, ITEM_SUBCLASS_WEAPON_MACE, ITEM_SUBCLASS_WEAPON_FIST };
             oh_weapons = { ITEM_SUBCLASS_ARMOR_MISC, ITEM_SUBCLASS_ARMOR_SHIELD };
             r_weapons = { ITEM_SUBCLASS_ARMOR_TOTEM };
         }
-        else if (m_weightScales[spec].info.name == "enhance")
+        else if (LookupItemCache(m_weightScales, spec).info.name == "enhance")
         {
             mh_weapons = { ITEM_SUBCLASS_WEAPON_MACE2, ITEM_SUBCLASS_WEAPON_AXE2 };
             r_weapons = { ITEM_SUBCLASS_ARMOR_TOTEM };
@@ -660,19 +660,19 @@ bool RandomItemMgr::ShouldEquipWeaponForSpec(uint8 playerclass, uint8 spec, Item
     }
     case CLASS_DRUID:
     {
-        if (m_weightScales[spec].info.name == "feraltank")
+        if (LookupItemCache(m_weightScales, spec).info.name == "feraltank")
         {
             mh_weapons = { ITEM_SUBCLASS_WEAPON_STAFF, ITEM_SUBCLASS_WEAPON_MACE2, ITEM_SUBCLASS_WEAPON_DAGGER, ITEM_SUBCLASS_WEAPON_MACE };
             oh_weapons = { ITEM_SUBCLASS_ARMOR_MISC };
             r_weapons = { ITEM_SUBCLASS_ARMOR_IDOL };
         }
-        else if (m_weightScales[spec].info.name == "resto")
+        else if (LookupItemCache(m_weightScales, spec).info.name == "resto")
         {
             mh_weapons = { ITEM_SUBCLASS_WEAPON_STAFF, ITEM_SUBCLASS_WEAPON_DAGGER, ITEM_SUBCLASS_WEAPON_MACE, ITEM_SUBCLASS_WEAPON_MACE2 };
             oh_weapons = { ITEM_SUBCLASS_ARMOR_MISC };
             r_weapons = { ITEM_SUBCLASS_ARMOR_IDOL };
         }
-        else if (m_weightScales[spec].info.name == "feraldps")
+        else if (LookupItemCache(m_weightScales, spec).info.name == "feraldps")
         {
             mh_weapons = { ITEM_SUBCLASS_WEAPON_STAFF, ITEM_SUBCLASS_WEAPON_MACE2, ITEM_SUBCLASS_WEAPON_MACE };
             oh_weapons = { ITEM_SUBCLASS_ARMOR_MISC };
@@ -1808,7 +1808,7 @@ uint32 RandomItemMgr::CalculateStatWeight(uint8 playerclass, uint8 spec, ItemPro
             return 0;
 
         bool playerCaster = false;
-        for (std::vector<WeightScaleStat>::iterator i = m_weightScales[spec].stats.begin(); i != m_weightScales[spec].stats.end(); ++i)
+        for (std::vector<WeightScaleStat>::const_iterator i = LookupItemCache(m_weightScales, spec).stats.begin(); i != LookupItemCache(m_weightScales, spec).stats.end(); ++i)
         {
             if (i->stat == "splpwr" || i->stat == "int" || i->stat == "manargn" || i->stat == "splheal" || i->stat == "spellcritstrkrtng" || i->stat == "spellhitrtng")
             {
@@ -1827,7 +1827,7 @@ uint32 RandomItemMgr::CalculateStatWeight(uint8 playerclass, uint8 spec, ItemPro
             return 0;
 
         bool playerAttacker = false;
-        for (std::vector<WeightScaleStat>::iterator i = m_weightScales[spec].stats.begin(); i != m_weightScales[spec].stats.end(); ++i)
+        for (std::vector<WeightScaleStat>::const_iterator i = LookupItemCache(m_weightScales, spec).stats.begin(); i != LookupItemCache(m_weightScales, spec).stats.end(); ++i)
         {
             if (i->stat == "str" || i->stat == "agi" || i->stat == "atkpwr" || i->stat == "mledps" || i->stat == "rgddps" || i->stat == "hitrtng" || i->stat == "critstrkrtng")
             {
@@ -1969,7 +1969,7 @@ uint32 RandomItemMgr::CalculateEnchantWeight(uint8 playerclass, uint8 spec, uint
                     if (ItemStatLink.find(stat) == ItemStatLink.end())
                         continue;
 
-                    weight += CalculateSingleStatWeight(playerclass, spec, ItemStatLink[stat], value);
+                    weight += CalculateSingleStatWeight(playerclass, spec, LookupItemCache(ItemStatLink, stat), value);
                 }
                 // spell damage
                 // SPELL_AURA_MOD_DAMAGE_DONE
@@ -2079,7 +2079,7 @@ uint32 RandomItemMgr::ItemStatWeight(Player* player, Item* item)
 uint32 RandomItemMgr::CalculateSingleStatWeight(uint8 playerclass, uint8 spec, std::string stat, int32 value)
 {
     uint32 statWeight = 0;
-    for (std::vector<WeightScaleStat>::iterator i = m_weightScales[spec].stats.begin(); i != m_weightScales[spec].stats.end(); ++i)
+    for (std::vector<WeightScaleStat>::const_iterator i = LookupItemCache(m_weightScales, spec).stats.begin(); i != LookupItemCache(m_weightScales, spec).stats.end(); ++i)
     {
         if (stat == i->stat)
         {
@@ -2091,7 +2091,7 @@ uint32 RandomItemMgr::CalculateSingleStatWeight(uint8 playerclass, uint8 spec, s
             if (weighted <= 0)
                 return 0;
             statWeight = (uint32)weighted;
-            sLog.outDetail("stat: %s, val: %d, weight: %d, total: %d, class: %d, spec: %s", stat.c_str(), value, i->weight, statWeight, playerclass, m_weightScales[spec].info.name.c_str());
+            sLog.outDetail("stat: %s, val: %d, weight: %d, total: %d, class: %d, spec: %s", stat.c_str(), value, i->weight, statWeight, playerclass, LookupItemCache(m_weightScales, spec).info.name.c_str());
             return statWeight;
         }
     }
@@ -2299,20 +2299,20 @@ uint32 RandomItemMgr::GetUpgrade(Player* player, std::string spec, uint8 slot, u
 
     for (uint32 specNum = 1; specNum < 5; ++specNum)
     {
-        if (!m_weightScales[specNum].info.id)
+        if (!LookupItemCache(m_weightScales, specNum).info.id)
             continue;
 
-        classspecs.push_back(m_weightScales[specNum].info.id);
+        classspecs.push_back(LookupItemCache(m_weightScales, specNum).info.id);
 
-        if (m_weightScales[specNum].info.name == spec)
-            specId = m_weightScales[specNum].info.id;
+        if (LookupItemCache(m_weightScales, specNum).info.name == spec)
+            specId = LookupItemCache(m_weightScales, specNum).info.id;
     }
     if (!specId)
         return 0;
 
-    if (itemId && itemInfoCache[itemId])
+    if (itemId && LookupItemCache(itemInfoCache, itemId))
     {
-        oldStatWeight = itemInfoCache[itemId]->weights[specId];
+        oldStatWeight = LookupItemCache(LookupItemCache(itemInfoCache, itemId)->weights, specId);
 
         if (oldStatWeight)
             sLog.outString("Old Item: %d, weight: %d", itemId, oldStatWeight);
@@ -2322,12 +2322,12 @@ uint32 RandomItemMgr::GetUpgrade(Player* player, std::string spec, uint8 slot, u
 
     for (std::map<uint32, ItemInfoEntry*>::iterator i = itemInfoCache.begin(); i != itemInfoCache.end(); ++i)
     {
-        ItemInfoEntry* info = i->second;
+        ItemInfoEntry const* info = i->second;
         if (!info)
             continue;
 
         // skip useless items
-        if (info->weights[specId] == 0)
+        if (LookupItemCache(info->weights, specId) == 0)
             continue;
 
         // skip higher lvl
@@ -2351,11 +2351,11 @@ uint32 RandomItemMgr::GetUpgrade(Player* player, std::string spec, uint8 slot, u
             continue;
 
         // skip worse items
-        if (info->weights[specId] <= oldStatWeight)
+        if (LookupItemCache(info->weights, specId) <= oldStatWeight)
             continue;
 
         // skip items that only fit in slot, but not stats
-        if (!itemId && info->weights[specId] == 1 && player->GetLevel() > 40)
+        if (!itemId && LookupItemCache(info->weights, specId) == 1 && player->GetLevel() > 40)
             continue;
 
         // skip quest items
@@ -2372,7 +2372,7 @@ uint32 RandomItemMgr::GetUpgrade(Player* player, std::string spec, uint8 slot, u
         }
 
         // skip no stats trinkets
-        if (info->weights[specId] == 1 &&
+        if (LookupItemCache(info->weights, specId) == 1 &&
             info->slot == EQUIPMENT_SLOT_NECK ||
             info->slot == EQUIPMENT_SLOT_TRINKET1 ||
             info->slot == EQUIPMENT_SLOT_TRINKET2 ||
@@ -2385,10 +2385,10 @@ uint32 RandomItemMgr::GetUpgrade(Player* player, std::string spec, uint8 slot, u
         uint32 bestSpecScore = 0;
         for (std::vector<uint32>::iterator i = classspecs.begin(); i != classspecs.end(); ++i)
         {
-            if (info->weights[*i] > bestSpecScore)
+            if (LookupItemCache(info->weights, *i) > bestSpecScore)
             {
                 bestSpecId = *i;
-                bestSpecScore = info->weights[specId];
+                bestSpecScore = LookupItemCache(info->weights, specId);
             }
         }
 
@@ -2398,14 +2398,14 @@ uint32 RandomItemMgr::GetUpgrade(Player* player, std::string spec, uint8 slot, u
         if (!closestUpgrade)
         {
             closestUpgrade = info->itemId;
-            closestUpgradeWeight = info->weights[specId];
+            closestUpgradeWeight = LookupItemCache(info->weights, specId);
         }
 
         // pick closest upgrade
-        if (info->weights[specId] < closestUpgradeWeight)
+        if (LookupItemCache(info->weights, specId) < closestUpgradeWeight)
         {
             closestUpgrade = info->itemId;
-            closestUpgradeWeight = info->weights[specId];
+            closestUpgradeWeight = LookupItemCache(info->weights, specId);
         }
     }
 
@@ -2427,9 +2427,9 @@ std::vector<uint32> RandomItemMgr::GetUpgradeList(Player* player, uint32 specId,
     uint32 closestUpgradeWeight = 0;
     std::vector<uint32> classspecs;
 
-    if (itemId && itemInfoCache[itemId])
+    if (itemId && LookupItemCache(itemInfoCache, itemId))
     {
-        oldStatWeight = itemInfoCache[itemId]->weights[specId];
+        oldStatWeight = LookupItemCache(LookupItemCache(itemInfoCache, itemId)->weights, specId);
 
         if (oldStatWeight)
             sLog.outString("Old Item: %d, weight: %d", itemId, oldStatWeight);
@@ -2439,12 +2439,12 @@ std::vector<uint32> RandomItemMgr::GetUpgradeList(Player* player, uint32 specId,
 
     for (std::map<uint32, ItemInfoEntry*>::iterator i = itemInfoCache.begin(); i != itemInfoCache.end(); ++i)
     {
-        ItemInfoEntry* info = i->second;
+        ItemInfoEntry const* info = i->second;
         if (!info)
             continue;
 
         // skip useless items
-        if (info->weights[specId] == 0)
+        if (LookupItemCache(info->weights, specId) == 0)
             continue;
 
         // skip higher lvl
@@ -2468,11 +2468,11 @@ std::vector<uint32> RandomItemMgr::GetUpgradeList(Player* player, uint32 specId,
             continue;
 
         // skip worse items
-        if (info->weights[specId] <= oldStatWeight)
+        if (LookupItemCache(info->weights, specId) <= oldStatWeight)
             continue;
 
         // skip items that only fit in slot, but not stats
-        if (!itemId && info->weights[specId] == 1 && player->GetLevel() > 20)
+        if (!itemId && LookupItemCache(info->weights, specId) == 1 && player->GetLevel() > 20)
             continue;
 
         // skip quest items
@@ -2489,7 +2489,7 @@ std::vector<uint32> RandomItemMgr::GetUpgradeList(Player* player, uint32 specId,
         }
 
         // skip no stats trinkets
-        if (info->weights[specId] < 2 && (
+        if (LookupItemCache(info->weights, specId) < 2 && (
             info->slot == EQUIPMENT_SLOT_NECK ||
             info->slot == EQUIPMENT_SLOT_TRINKET1 ||
             info->slot == EQUIPMENT_SLOT_TRINKET2 ||
@@ -2511,10 +2511,10 @@ std::vector<uint32> RandomItemMgr::GetUpgradeList(Player* player, uint32 specId,
         //    uint32 bestSpecScore = 0;
         //    for (std::vector<uint32>::iterator i = classspecs.begin(); i != classspecs.end(); ++i)
         //    {
-        //        if (info->weights[*i] > bestSpecScore)
+        //        if (LookupItemCache(info->weights, *i) > bestSpecScore)
         //        {
         //            bestSpecId = *i;
-        //            bestSpecScore = info->weights[specId];
+        //            bestSpecScore = LookupItemCache(info->weights, specId);
         //        }
         //    }
 
@@ -2526,10 +2526,10 @@ std::vector<uint32> RandomItemMgr::GetUpgradeList(Player* player, uint32 specId,
         //continue;
 
         // pick closest upgrade
-        if (info->weights[specId] > closestUpgradeWeight)
+        if (LookupItemCache(info->weights, specId) > closestUpgradeWeight)
         {
             closestUpgrade = info->itemId;
-            closestUpgradeWeight = info->weights[specId];
+            closestUpgradeWeight = LookupItemCache(info->weights, specId);
         }
     }
 
@@ -2537,14 +2537,14 @@ std::vector<uint32> RandomItemMgr::GetUpgradeList(Player* player, uint32 specId,
         sLog.outString("New Items: %zu, Old item:%d, New items max: %d", listItems.size(), oldStatWeight, closestUpgradeWeight);
 
     // sort by stat weight
-    std::sort(listItems.begin(), listItems.end(), [specId](int a, int b) { return sRandomItemMgr.GetStatWeight(a, specId) <= sRandomItemMgr.GetStatWeight(b, specId); });
+    std::sort(listItems.begin(), listItems.end(), [specId](int a, int b) { return sRandomItemMgr.GetStatWeight(a, specId) < sRandomItemMgr.GetStatWeight(b, specId); });
 
     return listItems;
 }
 
 bool RandomItemMgr::HasStatWeight(uint32 itemId)
 {
-    return itemInfoCache[itemId] != nullptr;
+    return LookupItemCache(itemInfoCache, itemId) != nullptr;
 }
 
 bool RandomItemMgr::CanBuyFromVendor(Player *player, uint32 itemId, uint32 creatureId)
@@ -2590,7 +2590,7 @@ bool RandomItemMgr::CanBuyFromVendor(Player *player, uint32 itemId, uint32 creat
 
 bool RandomItemMgr::HasSameQuestRewards(Player *player, uint32 itemId)
 {
-    ItemInfoEntry* info = itemInfoCache[itemId];
+    ItemInfoEntry const* info = LookupItemCache(itemInfoCache, itemId);
     if (!info)
         return false;
     if (info->source != ITEM_SOURCE_QUEST)
@@ -2627,7 +2627,7 @@ bool RandomItemMgr::HasSameQuestRewards(Player *player, uint32 itemId)
 
 uint32 RandomItemMgr::GetMinLevelFromCache(uint32 itemId)
 {
-    ItemInfoEntry* info = itemInfoCache[itemId];
+    ItemInfoEntry const* info = LookupItemCache(itemInfoCache, itemId);
     if (!info)
         return 0;
 
@@ -2639,7 +2639,7 @@ uint32 RandomItemMgr::GetStatWeight(Player* player, uint32 itemId)
     if (!player || !itemId)
         return 0;
 
-    if (!itemInfoCache[itemId])
+    if (!LookupItemCache(itemInfoCache, itemId))
         return 0;
 
     uint32 statWeight = 0;
@@ -2649,13 +2649,13 @@ uint32 RandomItemMgr::GetStatWeight(Player* player, uint32 itemId)
     if (specId == 0)
         return 0;
 
-    if (!m_weightScales[specId].info.id)
+    if (!LookupItemCache(m_weightScales, specId).info.id)
         return 0;
 
     std::map<uint32, ItemInfoEntry*>::iterator itr = itemInfoCache.find(itemId);
     if (itr != itemInfoCache.end())
     {
-        statWeight = itr->second->weights[specId];
+        statWeight = LookupItemCache(itr->second->weights, specId);
     }
 
     return statWeight;
@@ -2666,19 +2666,19 @@ uint32 RandomItemMgr::GetStatWeight(uint32 itemId, uint32 specId)
     if (!specId || !itemId)
         return 0;
 
-    if (!itemInfoCache[itemId])
+    if (!LookupItemCache(itemInfoCache, itemId))
         return 0;
 
     uint32 statWeight = 0;
     std::vector<uint32> classspecs;
 
-    if (!m_weightScales[specId].info.id)
+    if (!LookupItemCache(m_weightScales, specId).info.id)
         return 0;
 
     std::map<uint32, ItemInfoEntry*>::iterator itr = itemInfoCache.find(itemId);
     if (itr != itemInfoCache.end())
     {
-        statWeight = itr->second->weights[specId];
+        statWeight = LookupItemCache(itr->second->weights, specId);
     }
 
     return statWeight;
@@ -2689,10 +2689,10 @@ uint32 RandomItemMgr::GetBestRandomEnchantStatWeight(uint32 itemId, uint32 specI
     if (!specId || !itemId)
         return 0;
 
-    if (!itemInfoCache[itemId])
+    if (!LookupItemCache(itemInfoCache, itemId))
         return 0;
 
-    if (!m_weightScales[specId].info.id)
+    if (!LookupItemCache(m_weightScales, specId).info.id)
         return 0;
 
     uint8 plrClass = 0;
@@ -2725,7 +2725,7 @@ uint32 RandomItemMgr::GetLiveStatWeight(Player* player, uint32 itemId, uint32 sp
     if (!player || !itemId)
         return 0;
 
-    if (!itemInfoCache[itemId])
+    if (!LookupItemCache(itemInfoCache, itemId))
         return 0;
 
     uint32 statWeight = 0;
@@ -2733,14 +2733,14 @@ uint32 RandomItemMgr::GetLiveStatWeight(Player* player, uint32 itemId, uint32 sp
     if (specId == 0)
         return 0;
 
-    if (!m_weightScales[specId].info.id)
+    if (!LookupItemCache(m_weightScales, specId).info.id)
         return 0;
 
-    ItemInfoEntry* info = itemInfoCache[itemId];
+    ItemInfoEntry const* info = LookupItemCache(itemInfoCache, itemId);
     if (!info)
         return 0;
 
-    statWeight = info->weights[specId];
+    statWeight = LookupItemCache(info->weights, specId);
 
     // skip higher lvl
     if (info->minLevel > player->GetLevel())
@@ -2822,7 +2822,7 @@ uint32 RandomItemMgr::GetLiveStatWeight(Player* player, uint32 itemId, uint32 sp
         return 0;
 
     // skip no stats trinkets
-    if (info->weights[specId] == 1 && (
+    if (LookupItemCache(info->weights, specId) == 1 && (
         info->slot == EQUIPMENT_SLOT_NECK ||
         info->slot == EQUIPMENT_SLOT_TRINKET1 ||
         info->slot == EQUIPMENT_SLOT_TRINKET2 ||
@@ -2835,16 +2835,16 @@ uint32 RandomItemMgr::GetLiveStatWeight(Player* player, uint32 itemId, uint32 sp
     uint32 bestSpecScore = 0;
     for (uint32 spec = 1; spec < MAX_STAT_SCALES; ++spec)
     {
-        if (!m_weightScales[spec].info.id)
+        if (!LookupItemCache(m_weightScales, spec).info.id)
             continue;
 
-        if (m_weightScales[spec].info.classId != player->GetClass())
+        if (LookupItemCache(m_weightScales, spec).info.classId != player->GetClass())
             continue;
 
-        if (info->weights[spec] > bestSpecScore && info->weights[spec] > 1)
+        if (LookupItemCache(info->weights, spec) > bestSpecScore && LookupItemCache(info->weights, spec) > 1)
         {
             bestSpecId = spec;
-            bestSpecScore = info->weights[spec];
+            bestSpecScore = LookupItemCache(info->weights, spec);
         }
     }*/
 
@@ -2896,11 +2896,38 @@ void RandomItemMgr::BuildEquipCache()
             sLog.outErrorDb("TortoiseBots: ai_playerbot_equip_cache is missing; skipping optional cache generation");
             return;
         }
-        if (cacheCount->Fetch()->GetUInt32() == 0)
-        {
-            sLog.outString("Equipment cache is present but empty; skipping optional cache generation");
+        // A valid empty schema needs its first native cache build. Skipping
+        // this leaves the equipment/random-item consumers permanently empty.
+
+        // Startup uses synchronous SQL. Persist in bounded INSERT batches
+        // under one native transaction: no per-item autocommit stalls, and a
+        // failed first build cannot leave a partial cache to load next time.
+        if (!CharacterDatabase.BeginTransaction())
             return;
-        }
+        struct CacheTransaction
+        {
+            bool open = true;
+            ~CacheTransaction() { if (open) CharacterDatabase.RollbackTransaction(); }
+        } transaction;
+        std::string const insertPrefix = "INSERT INTO ai_playerbot_equip_cache (clazz,spec,lvl,slot,quality,item) VALUES ";
+        std::string rows;
+        uint32 rowCount = 0;
+        bool writesOk = true;
+        auto flushRows = [&]
+        {
+            if (!rowCount) return;
+            writesOk &= CharacterDatabase.Execute((insertPrefix + rows).c_str());
+            rows.clear();
+            rowCount = 0;
+        };
+        auto storeRow = [&](uint32 clazz, uint32 spec, uint32 level, uint32 slot, uint32 quality, uint32 item)
+        {
+            if (rowCount) rows += ',';
+            rows += '(' + std::to_string(clazz) + ',' + std::to_string(spec) + ',' +
+                std::to_string(level) + ',' + std::to_string(slot) + ',' +
+                std::to_string(quality) + ',' + std::to_string(item) + ')';
+            if (++rowCount == 500) flushRows();
+        };
 
         uint64 total = uint64(MAX_CLASSES * 3 * maxLevel * EQUIPMENT_SLOT_END * ITEM_QUALITY_ARTIFACT);
         sLog.outString("Building equipment cache for %d classes, %d specs, %d levels, %d slots, %d quality from %d items (%zu total)",
@@ -2915,7 +2942,16 @@ void RandomItemMgr::BuildEquipCache()
         BotEquipKey tabardKey(60, 1, 1, EQUIPMENT_SLOT_TABARD, 1);
         BotEquipKey shirtKey(60, 1, 1, EQUIPMENT_SLOT_BODY, 1);
 
-        // The cache is built only from ItemPrototype rows loaded by Tortoise.
+        // Index native candidates once. The full builder below still applies
+        // every original level/spec/slot predicate, without rescanning sparse
+        // item IDs for each of those combinations during the first startup.
+        std::map<std::pair<uint8, uint32>, std::vector<ItemPrototype const*>> candidates;
+        for (uint8 clazz = CLASS_WARRIOR; clazz < MAX_CLASSES; ++clazz)
+            if (((1u << (clazz - 1)) & CLASSMASK_ALL_PLAYABLE) && sChrClassesStore.LookupEntry(clazz))
+                for (uint32 id = 0; id < sItemStorage.GetMaxEntry(); ++id)
+                    if (ItemPrototype const* proto = sObjectMgr.GetItemPrototype(id))
+                        if (IsRandomGearCandidate(proto, clazz))
+                            candidates[{clazz, proto->Quality}].push_back(proto);
 
         for (uint8 clazz = CLASS_WARRIOR; clazz < MAX_CLASSES; ++clazz)
         {
@@ -2940,17 +2976,9 @@ void RandomItemMgr::BuildEquipCache()
                             BotEquipKey key(level, clazz, spec, slot, quality);
 
                             RandomItemList items;
-                            for (uint32 itemId = 0; itemId < sItemStorage.GetMaxEntry(); ++itemId)
+                            for (ItemPrototype const* proto : candidates[{clazz, quality}])
                             {
-                                ItemPrototype const* proto = sObjectMgr.GetItemPrototype(itemId);
-                                if (!proto)
-                                    continue;
-
-                                if (!IsRandomGearCandidate(proto, clazz))
-                                    continue;
-
-                                if (proto->Quality != key.quality)
-                                    continue;
+                                uint32 const itemId = proto->ItemId;
 
                                 if ((slot == EQUIPMENT_SLOT_BODY || slot == EQUIPMENT_SLOT_TABARD))
                                 {
@@ -2958,13 +2986,12 @@ void RandomItemMgr::BuildEquipCache()
                                     if (slots.find((InventoryType)proto->InventoryType) == slots.end())
                                         continue;
 
-                                    if (slot == EQUIPMENT_SLOT_BODY && std::find(shirtsList.begin(), shirtsList.end(), itemId) == shirtsList.end())
-                                        shirtsList.push_back(itemId);
-                                    if (slot == EQUIPMENT_SLOT_TABARD && std::find(tabardsList.begin(), tabardsList.end(), itemId) == tabardsList.end())
-                                        tabardsList.push_back(itemId);
+                                    RandomItemList& cosmetic = slot == EQUIPMENT_SLOT_BODY ? shirtsList : tabardsList;
+                                    if (std::find(cosmetic.begin(), cosmetic.end(), itemId) != cosmetic.end())
+                                        continue;
+                                    cosmetic.push_back(itemId);
 
-                                    CharacterDatabase.PExecute("replace into ai_playerbot_equip_cache (id, clazz, spec, lvl, slot, quality, item) values (%u, %u, %u, %u, %u, %u, %u)",
-                                        2000000 + itemId, 1, 1, 60, slot, 1, itemId);
+                                    storeRow(1, 1, 60, slot, 1, itemId);
 
                                     continue;
                                 }
@@ -3017,8 +3044,7 @@ void RandomItemMgr::BuildEquipCache()
 
                                 items.push_back(itemId);
 
-                                CharacterDatabase.PExecute("insert into ai_playerbot_equip_cache (clazz, spec, lvl, slot, quality, item) values (%u, %u, %u, %u, %u, %u)",
-                                    clazz, spec, level, slot, quality, itemId);
+                                storeRow(clazz, spec, level, slot, quality, itemId);
                             }
 
                             equipCache[key] = items;
@@ -3043,6 +3069,20 @@ void RandomItemMgr::BuildEquipCache()
                     (unsigned long long)specItemCounts[spec]);
             }
         }
+        flushRows();
+        if (!writesOk)
+        {
+            equipCache.clear();
+            sLog.outError("Equipment cache build could not queue all rows; rolling back");
+            return;
+        }
+        transaction.open = false;
+        if (!CharacterDatabase.CommitTransaction())
+        {
+            equipCache.clear();
+            sLog.outError("Equipment cache commit failed; initialization remains unavailable");
+            return;
+        }
         equipCache[tabardKey] = tabardsList;
         equipCache[shirtKey] = shirtsList;
         sLog.outString("Equipment cache saved to DB");
@@ -3052,7 +3092,7 @@ void RandomItemMgr::BuildEquipCache()
 RandomItemList RandomItemMgr::Query(uint32 level, uint8 clazz, uint8 spec, uint8 slot, uint32 quality)
 {
     BotEquipKey key(level, clazz, spec, slot, quality);
-    return equipCache[key];
+    return LookupItemCache(equipCache, key);
 }
 
 void RandomItemMgr::BuildAmmoCache()
@@ -3101,7 +3141,7 @@ void RandomItemMgr::BuildAmmoCache()
 
 uint32 RandomItemMgr::GetAmmo(uint32 level, uint32 subClass)
 {
-    return ammoCache[(level - 1) / 10][subClass];
+    return LookupItemCache(LookupItemCache(ammoCache, (level - 1) / 10), subClass);
 }
 
 
@@ -3236,7 +3276,7 @@ void RandomItemMgr::BuildFoodCache()
 
 uint32 RandomItemMgr::GetRandomPotion(uint32 level, uint32 effect)
 {
-    std::vector<uint32> potions = potionCache[(level - 1) / 10][effect];
+    std::vector<uint32> potions = LookupItemCache(LookupItemCache(potionCache, (level - 1) / 10), effect);
     if (potions.empty()) return 0;
     return potions[urand(0, potions.size() - 1)];
 }
@@ -3282,7 +3322,7 @@ uint32 RandomItemMgr::GetFood(uint32 level, uint32 category)
 
 uint32 RandomItemMgr::GetRandomFood(uint32 level, uint32 category)
 {
-    std::vector<uint32> food = foodCache[(level - 1) / 10][category];
+    std::vector<uint32> food = LookupItemCache(LookupItemCache(foodCache, (level - 1) / 10), category);
     if (food.empty()) return 0;
     return food[urand(0, food.size() - 1)];
 }
@@ -3332,7 +3372,7 @@ void RandomItemMgr::BuildTradeCache()
 
 uint32 RandomItemMgr::GetRandomTrade(uint32 level)
 {
-    std::vector<uint32> trade = tradeCache[(level - 1) / 10];
+    std::vector<uint32> trade = LookupItemCache(tradeCache, (level - 1) / 10);
     if (trade.empty()) return 0;
     return trade[urand(0, trade.size() - 1)];
 }

@@ -14,7 +14,7 @@ Unit* PartyMemberValue::FindPartyMember(std::list<Player*>* party, FindPlayerPre
     {
         Player* player = *i;
 
-        if (!player)
+        if (!player || !ai->IsSafe(player))
             continue;
 
         if (ignoreTanks && ai->IsTank(player))
@@ -45,7 +45,7 @@ Unit* PartyMemberValue::FindPartyMember(FindPlayerPredicate &predicate, bool ign
     {
         for (GroupReference *ref = group->GetFirstMember(); ref; ref = ref->next())
         {
-            if (!ref->GetSource() || bot->GetMapId() != ref->GetSource()->GetMapId()) continue;
+            if (!ref->GetSource() || !ai->IsSafe(ref->GetSource())) continue;
 
             if (ref->GetSource() != bot)
             {
@@ -86,7 +86,7 @@ Unit* PartyMemberValue::FindPartyMember(FindPlayerPredicate &predicate, bool ign
     }
 
     std::list<Player*> healers, tanks, others, masters;
-    if (master) masters.push_back(master);
+    if (master && ai->IsSafe(master)) masters.push_back(master);
     for (std::list<ObjectGuid>::iterator i = nearestPlayers.begin(); i != nearestPlayers.end(); ++i)
     {
         Player* player = dynamic_cast<Player*>(ai->GetUnit(*i));
@@ -139,7 +139,7 @@ Unit* PartyMemberValue::FindPartyMember(FindPlayerPredicate &predicate, bool ign
 
 bool PartyMemberValue::Check(Unit* player)
 {
-    return player && player != bot && player->GetMapId() == bot->GetMapId() &&
+    return player && player != bot && ai->IsSafe(player) &&
         bot->IsWithinDistInMap(player, sPlayerbotAIConfig.sightDistance, false);
 }
 

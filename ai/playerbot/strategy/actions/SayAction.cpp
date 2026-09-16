@@ -1,3 +1,4 @@
+#include "runtime/BotWorldActions.h"
 
 #include "playerbot/playerbot.h"
 #include "../../runtime/PlayerbotAIStorage.h" // Headless storage shim
@@ -24,6 +25,9 @@ SayAction::SayAction(PlayerbotAI* ai) : Action(ai, "say"), Qualified()
 
 bool SayAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
+
     std::string text = "";
     std::map<std::string, std::string> placeholders;
     Unit* target = AI_VALUE(Unit*, "tank target");
@@ -96,7 +100,7 @@ bool SayAction::Execute(Event& event)
     }
 
     // load text based on chance
-    if (!sPlayerbotTextMgr.GetBotText(qualifier, text, placeholders))
+    if (!sPlayerbotTextMgr.GetBotText(qualifier, text, placeholders) || text.empty())
         return false;
 
     if (text.find("/y ") == 0)
@@ -646,15 +650,13 @@ void ChatReplyAction::ChatReplyDo(Player* bot, uint32 type, uint32 guid1, uint32
 
                 bool debug = PlayerbotAIStorage::Instance().GetAI(bot)->HasStrategy("debug llm", BotState::BOT_STATE_NON_COMBAT);
 
-                WorldSession* session = bot->GetSession();
-
                 WorldPacket chatTemplate = GetPacketTemplate(CMSG_MESSAGECHAT, type, bot, player, channelName);
                 WorldPacket emoteTemplate = (type == CHAT_MSG_SAY || type == CHAT_MSG_WHISPER) ? GetPacketTemplate(CMSG_MESSAGECHAT, CHAT_MSG_EMOTE, bot, player) : WorldPacket();
                 WorldPacket systemTemplate = GetPacketTemplate(CMSG_MESSAGECHAT, CHAT_MSG_WHISPER, bot, player);
 
                 futurePackets futPackets = std::async(std::launch::async, ChatReplyAction::GenerateResponsePackets, json, chatTemplate, emoteTemplate, systemTemplate, startPattern, endPattern, deletePattern, splitPattern, debug);
 
-                ai->SendDelayedPacket(session, std::move(futPackets));
+                ai->SendDelayedPacket(std::move(futPackets));
             }
             else if (player != bot || sPlayerbotAIConfig.llmBotToBotChatChance)
             {
@@ -977,6 +979,9 @@ bool ChatReplyAction::HandleLFGQuestsReply(Player* bot, ChatChannelSource chatCh
 
 bool ChatReplyAction::SendGeneralResponse(Player* bot, ChatChannelSource chatChannelSource, std::string responseMessage, std::string name)
 {
+    if (responseMessage.empty())
+        return false;
+
     // send responds
     switch (chatChannelSource)
     {
@@ -1537,6 +1542,9 @@ bool ChatReplyAction::isUseful()
 
 bool SpeakAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
+
     bool botsTalkLikePlayers = true;
 
     std::string text = event.GetParam();

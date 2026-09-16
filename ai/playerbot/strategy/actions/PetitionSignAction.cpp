@@ -1,3 +1,4 @@
+#include "runtime/BotWorldActions.h"
 
 #include "playerbot/playerbot.h"
 #include "PetitionSignAction.h"
@@ -6,6 +7,9 @@ using namespace ai;
 
 bool PetitionSignAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
+
     Player* requester = event.GetOwner() ? event.GetOwner() : GetMaster();
     WorldPacket p(event.GetPacket());
     p.rpos(0);

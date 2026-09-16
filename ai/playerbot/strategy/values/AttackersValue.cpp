@@ -184,10 +184,8 @@ void AttackersValue::AddTargetsOf(Group* group, std::set<Unit*>& targets, std::s
         // Only add group member targets that are alive and near the player
         Player* member = sObjectMgr.GetPlayer(itr->guid);
         if (member && (member != bot) &&
+           ai->IsSafe(member) &&
            sServerFacade.IsAlive(member) &&
-           member->IsInWorld() &&
-           !member->IsBeingTeleported() &&
-           (member->GetMapId() == bot->GetMapId()) &&
            (sServerFacade.getDistance2d(bot, member) <= GetRange()))
         {
             AddTargetsOf(member, targets, invalidTargets, getOne);
@@ -475,7 +473,7 @@ bool AttackersValue::IgnoreTarget(Unit* target, Player* playerToCheckAgainst)
             AI_VALUE2(bool, "trigger active", "out of react range"))
             return true;
 
-        if (ai->GetMaster() && !ai->HasActivePlayerMaster())
+        if (ai->GetMaster() && ai->IsSafe(ai->GetMaster()) && !ai->HasActivePlayerMaster())
         {
             Player* player = ai->GetMaster();
 

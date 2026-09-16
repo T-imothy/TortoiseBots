@@ -1,5 +1,6 @@
 
 #include "playerbot/playerbot.h"
+#include "runtime/BotWorldActions.h"
 #include "InviteToGroupAction.h"
 #include "playerbot/ServerFacade.h"
 #include "playerbot/strategy/values/Formations.h"
@@ -9,10 +10,13 @@ namespace ai
 {
     bool InviteToGroupAction::Invite(Player* inviter, Player* player)
     {
-        if (!player)
+        if (!inviter || !player || !inviter->GetSession() || !player->GetSession() ||
+            inviter->GetSession()->GetPlayer() != inviter || player->GetSession()->GetPlayer() != player)
             return false;
 
         if (inviter == player)
+            return false;
+        if (player->GetGroupInvite())
             return false;
 
         if (!PlayerbotAIStorage::Instance().GetAI(player) && !ai->GetSecurity()->CheckLevelFor(PlayerbotSecurityLevel::PLAYERBOT_SECURITY_INVITE, true, player))
@@ -31,11 +35,19 @@ namespace ai
         p << roles_mask;
         inviter->GetSession()->HandleGroupInviteOpcode(p);
 
-        return true;
+        Group* expected = inviter->GetGroup();
+        if (expected && expected->isBGGroup())
+            expected = inviter->GetOriginalGroup();
+        if (!expected)
+            expected = inviter->GetGroupInvite();
+        return expected && player->GetGroupInvite() == expected;
     }
 
     bool JoinGroupAction::Execute(Event& event)
     {
+        if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+            return *deferred;
+
         if (bot->InBattleGround())
             return false;
 
@@ -43,6 +55,8 @@ namespace ai
             return false;
 
         Player* master = event.GetOwner();
+        if (!master || !master->GetSession())
+            return false;
 
         Group* group = master->GetGroup();
 
@@ -194,6 +208,9 @@ namespace ai
 
     bool LfgAction::Execute(Event& event)
     {
+        if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+            return *deferred;
+
         Player* requester = event.GetOwner() ? event.GetOwner() : GetMaster();
         if (bot->InBattleGround())
             return false;
@@ -287,6 +304,9 @@ namespace ai
 
     bool InviteNearbyToGroupAction::Execute(Event& event)
     {
+        if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+            return *deferred;
+
         if (!bot->GetGroup())  //Select a random formation to copy.
         {
             std::vector<std::string> formations = { "melee","queue","chaos","circle","line","shield","arrow","near","far"};
@@ -427,6 +447,9 @@ namespace ai
 
     bool InviteGuildToGroupAction::Execute(Event& event)
     {
+        if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+            return *deferred;
+
         Guild* guild = sGuildMgr.GetGuildById(bot->GetGuildId());
 
         for (auto& member : getGuildMembers())

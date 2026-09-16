@@ -10,8 +10,7 @@ namespace ai
 
         virtual void ExternalEvent(std::string param, Player* owner = NULL) override
         {
-            this->param = param;
-            this->owner = owner;
+            externalEvent = Event(getName(), param, owner);
             triggered = true;
         }
 
@@ -20,12 +19,13 @@ namespace ai
             if (!triggered)
                 return Event();
 
-            return Event(getName(), param, owner);
+            return externalEvent;
         }
 
         virtual void Reset() override
         {
             triggered = false;
+            externalEvent = Event();
         }
     };
 }

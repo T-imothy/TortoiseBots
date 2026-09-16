@@ -1,6 +1,7 @@
 #pragma once
 
 #include "WorldPacketTrigger.h"
+#include "GroupInvitationTrigger.h"
 #include "WithinAreaTrigger.h"
 
 namespace ai
@@ -11,7 +12,7 @@ namespace ai
         WorldPacketTriggerContext()
         {
             creators["gossip hello"] = [](PlayerbotAI* ai) { return new WorldPacketTrigger(ai, "gossip hello"); };
-            creators["group invite"] = [](PlayerbotAI* ai) { return new WorldPacketTrigger(ai, "group invite"); };
+            creators["group invite"] = [](PlayerbotAI* ai) { return new GroupInvitationTrigger(ai); };
             creators["group set leader"] = [](PlayerbotAI* ai) { return new WorldPacketTrigger(ai, "group set leader"); };
             creators["not enough money"] = [](PlayerbotAI* ai) { return new WorldPacketTrigger(ai, "not enough money"); };
             creators["not enough reputation"] = [](PlayerbotAI* ai) { return new WorldPacketTrigger(ai, "not enough reputation"); };

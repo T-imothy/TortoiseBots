@@ -1329,7 +1329,9 @@ AiPlayerbot.PerfMonEnabled = 0
 ##################################################################################
 
 # Instant randomize: Force randombots to randomize on initial login.
-# AiPlayerbot.InstantRandomize = 0
+# On first eligible login, initialize an uninitialized random bot with a
+# persistent marker so later restarts do not reroll its level and equipment.
+AiPlayerbot.InstantRandomize = 1
 
 # Bot cheats. Same as "/w <bot> cheat (+/-/?) <cheatcode>" but only globally for all bots.
 # Values: taxi            (all nodes learned)
@@ -5175,3 +5177,24 @@ AiPlayerbot.HealDistanceBg = 25
 # vmangos) MUST keep this at 0 to avoid a worker-thread SIGSEGV; set 1 only on
 # cores with concurrent terrain support.
 # AiPlayerbot.AsyncTravelPartitions = 0
+
+# Bounded movement/taxi trace; restart to begin a new sample. Disabled by default.
+AiPlayerbot.BehaviorTrace = 0
+AiPlayerbot.BehaviorTraceMap = 0
+AiPlayerbot.BehaviorTraceX = -800
+AiPlayerbot.BehaviorTraceY = -530
+AiPlayerbot.BehaviorTraceRadius = 200
+
+# Native random-bot initialization / local grind relocation.
+AiPlayerbot.RandomBotMinLevel = 1
+AiPlayerbot.RandomBotMaxLevelChance = 0.15
+AiPlayerbot.RandomBotTeleportDistance = 1000
+
+# Dangerous one-start reset: only generated prefix + six-digit accounts are
+# eligible. Keep 0 normally. Set 1 for one deliberate rebuild, then restore 0
+# before the next restart or the replacement cohort will be deleted again.
+AiPlayerbot.DeleteRandomBotAccounts = 0
+
+# Native creation throughput: count ceiling plus soft time budget per service interval.
+AiPlayerbot.RandomBotsMaxCreatesPerInterval = 10
+AiPlayerbot.RandomBotCreationBudgetMs = 5

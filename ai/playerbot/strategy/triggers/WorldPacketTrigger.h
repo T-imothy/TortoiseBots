@@ -6,13 +6,12 @@ namespace ai
 {
     class WorldPacketTrigger : public Trigger {
     public:
-        WorldPacketTrigger(PlayerbotAI* ai, std::string command) : Trigger(ai, command), triggered(false) {}
+        WorldPacketTrigger(PlayerbotAI* ai, std::string command) : Trigger(ai, command) {}
 
         virtual void ExternalEvent(WorldPacket &packet, Player* owner = NULL) override
         {
             // Penqle's WorldPacket has a deleted copy operator=; copy-construct + move-assign instead.
-            this->packet = WorldPacket(packet);
-            this->owner = owner;
+            externalEvent = Event(getName(), packet, owner);
             triggered = true;
         }
 
@@ -21,16 +20,13 @@ namespace ai
             if (!triggered)
                 return Event();
 
-            return Event(getName(), packet, owner);
+            return externalEvent;
         }
 
         virtual void Reset() override
         {
             triggered = false;
+            externalEvent = Event();
         }
-    private:
-        WorldPacket packet;
-        bool triggered;
-        Player* owner;
     };
 }

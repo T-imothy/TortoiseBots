@@ -5,10 +5,12 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -41,8 +43,14 @@ func getEnvInt(key string, fallback int) int {
 	return fallback
 }
 
+func isLoopbackRequest(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	return err == nil && net.ParseIP(host) != nil && net.ParseIP(host).IsLoopback()
+}
+
 func main() {
 	httpPort := flag.Int("http-port", getEnvInt("HTTP_PORT", 8095), "HTTP server port")
+	httpHost := flag.String("http-host", getEnv("HTTP_HOST", "127.0.0.1"), "HTTP dashboard listen address")
 	udpHost := flag.String("udp-host", getEnv("UDP_HOST", "127.0.0.1"), "UDP telemetry listen address")
 	udpPort := flag.Int("udp-port", getEnvInt("UDP_PORT", 9195), "UDP telemetry listener port")
 	dbHost := flag.String("db-host", getEnv("DB_HOST", "127.0.0.1"), "MariaDB / MySQL host")
@@ -53,6 +61,15 @@ func main() {
 	issueMinAgeSec := flag.Int("issue-min-age-sec", getEnvInt("ISSUE_MIN_AGE_SEC", 300), "Only surface bot issues that persist at least this many seconds")
 	devNoAuth := flag.Bool("dev-no-auth", false, "Disable Game Master authentication check for local dev testing")
 	flag.Parse()
+	autoLoginUser := strings.TrimSpace(os.Getenv("AUTO_LOGIN_USER"))
+	autoLoginPassword := os.Getenv("AUTO_LOGIN_PASSWORD")
+	if (autoLoginUser == "") != (autoLoginPassword == "") {
+		log.Fatal("AUTO_LOGIN_USER and AUTO_LOGIN_PASSWORD must be set together")
+	}
+	autoLoginEnabled := autoLoginUser != ""
+	if autoLoginEnabled && *httpHost != "127.0.0.1" {
+		log.Fatal("automatic GM login requires HTTP to bind to 127.0.0.1")
+	}
 
 	log.Println("=====================================================")
 	log.Println(" Tortoise WoW — Bot & Server Observability Platform")
@@ -91,6 +108,29 @@ func main() {
 		log.Fatalf("Failed to initialize auth service: %v", err)
 	}
 	log.Printf("[Auth] Realmd MySQL authentication ready against %s:%d/%s", *dbHost, *dbPort, *dbName)
+	var autoSessionMu sync.Mutex
+	var autoSession *auth.SessionData
+	var autoValidatedAt time.Time
+	autoLoginToken := func() (string, error) {
+		autoSessionMu.Lock()
+		defer autoSessionMu.Unlock()
+		if autoSession == nil || time.Since(autoValidatedAt) >= 5*time.Minute || time.Now().Unix() >= autoSession.ExpiresAt {
+			session, err := authService.Authenticate(autoLoginUser, autoLoginPassword)
+			if err != nil {
+				autoSession = nil
+				return "", err
+			}
+			autoSession = session
+			autoValidatedAt = time.Now()
+		}
+		return authService.CreateSessionToken(autoSession), nil
+	}
+	if autoLoginEnabled {
+		if _, err := autoLoginToken(); err != nil {
+			log.Fatalf("automatic GM login failed: %v", err)
+		}
+		log.Printf("[Auth] Loopback auto-login enabled for GM account %s", autoLoginUser)
+	}
 
 	// 5. WebSocket hub and UDP ingestion
 	hub := ws.NewHub()
@@ -117,6 +157,10 @@ func main() {
 	mux.Handle("/metrics", promhttp.Handler())
 
 	mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
+		if autoLoginEnabled && isLoopbackRequest(r) {
+			http.Redirect(w, r, "/dashboard", http.StatusFound)
+			return
+		}
 		loginHTML, _ := web.FS.ReadFile("login.html")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(loginHTML)
@@ -167,17 +211,32 @@ func main() {
 				next(w, r)
 				return
 			}
-			if _, err := authService.GetSessionFromRequest(r); err != nil {
-				if strings.HasPrefix(r.URL.Path, "/api/") {
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusUnauthorized)
-					_ = json.NewEncoder(w).Encode(map[string]string{"error": "Unauthorized: GM session required"})
+			if autoLoginEnabled && isLoopbackRequest(r) {
+				token, err := autoLoginToken()
+				if err != nil {
+					log.Printf("[Auth] Automatic GM revalidation failed: %v", err)
+					http.Error(w, "Local GM auto-login unavailable", http.StatusServiceUnavailable)
 					return
 				}
-				http.Redirect(w, r, "/login", http.StatusFound)
+				if _, err := authService.VerifySessionToken(token); err != nil {
+					http.Error(w, "Local GM session unavailable", http.StatusServiceUnavailable)
+					return
+				}
+				authService.SetSessionCookie(w, token)
+				next(w, r)
 				return
 			}
-			next(w, r)
+			if _, err := authService.GetSessionFromRequest(r); err == nil {
+				next(w, r)
+				return
+			}
+			if strings.HasPrefix(r.URL.Path, "/api/") {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "Unauthorized: GM session required"})
+				return
+			}
+			http.Redirect(w, r, "/login", http.StatusFound)
 		}
 	}
 
@@ -231,7 +290,14 @@ func main() {
 	}))
 
 	upgrader := websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool { return true },
+		CheckOrigin: func(r *http.Request) bool {
+			if !autoLoginEnabled {
+				return true
+			}
+			origin := r.Header.Get("Origin")
+			return origin == fmt.Sprintf("http://127.0.0.1:%d", *httpPort) ||
+				origin == fmt.Sprintf("http://localhost:%d", *httpPort)
+		},
 	}
 
 	mux.HandleFunc("/api/v1/stream", func(w http.ResponseWriter, r *http.Request) {
@@ -250,7 +316,7 @@ func main() {
 		)
 	})
 
-	serverAddr := fmt.Sprintf("0.0.0.0:%d", *httpPort)
+	serverAddr := fmt.Sprintf("%s:%d", *httpHost, *httpPort)
 	log.Printf("[HTTP] Dashboard & API running at http://localhost:%d/dashboard", *httpPort)
 	log.Printf("[HTTP] Prometheus metrics available at http://localhost:%d/metrics", *httpPort)
 

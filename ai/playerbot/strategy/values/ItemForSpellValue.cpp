@@ -25,7 +25,7 @@ Item* ItemForSpellValue::Calculate()
 
     Item* itemForSpell = NULL;
     Player* trader = bot->GetTrader();
-    if (trader)
+    if (trader && ai->IsSafe(trader) && trader->GetTradeData())
     {
         itemForSpell = trader->GetTradeData()->GetItem(TRADE_SLOT_NONTRADED);
         if (itemForSpell && itemForSpell->IsFitToSpellRequirements(spellInfo))
@@ -33,10 +33,10 @@ Item* ItemForSpellValue::Calculate()
     }
 
     Player* master = ai->GetMaster();
-    if (master)
+    if (master && ai->IsSafe(master))
     {
         trader = master->GetTrader();
-        if (trader)
+        if (trader && ai->IsSafe(trader) && trader->GetTradeData())
         {
             itemForSpell = trader->GetTradeData()->GetItem(TRADE_SLOT_NONTRADED);
             if (itemForSpell && itemForSpell->IsFitToSpellRequirements(spellInfo))

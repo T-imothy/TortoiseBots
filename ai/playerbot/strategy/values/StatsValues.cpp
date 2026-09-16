@@ -26,6 +26,9 @@ bool IsDeadValue::Calculate()
 
 bool PetIsDeadValue::Calculate()
 {
+    if (bot->GetPet())
+        petDbCached = false;
+
     // Hunters have no pet system before level 10 (Revive Pet auto-learns at
     // 10+, AutoLearnSpellAction.cpp:62): without this, a pet-less lowbie with
     // a stale character_pet row reads "pet dead" and loops a failing revive.
@@ -39,10 +42,17 @@ bool PetIsDeadValue::Calculate()
 #endif
     if (!bot->GetPet())
     {
-        uint32 ownerid = bot->GetGUIDLow();
-        auto result = CharacterDatabase.PQuery("SELECT id FROM character_pet WHERE owner = '%u'", ownerid);
-        std::unique_ptr<QueryResult> result_guard(result);
-        return result != nullptr;
+        uint32 const now = WorldTimer::getMSTime();
+        if (!petDbCached || WorldTimer::getMSTimeDiff(lastPetDbCheckMs, now) >= 30000)
+        {
+            uint32 ownerid = bot->GetGUIDLow();
+            auto result = CharacterDatabase.PQuery("SELECT id FROM character_pet WHERE owner = '%u' LIMIT 1", ownerid);
+            std::unique_ptr<QueryResult> result_guard(result);
+            hasStoredPet = result != nullptr;
+            lastPetDbCheckMs = now;
+            petDbCached = true;
+        }
+        return hasStoredPet;
     }
     if (bot->GetPetGuid() && !bot->GetPet())
         return true;
@@ -137,7 +147,7 @@ bool IsInCombatValue::Calculate()
             for (Group::member_citerator itr = groupSlot.begin(); itr != groupSlot.end(); itr++)
             {
                 Player *member = sObjectMgr.GetPlayer(itr->guid);
-                if (!member || member == bot) continue;
+                if (!member || member == bot || !ai->IsSafe(member)) continue;
 
                 if (sServerFacade.IsInCombat(member) &&
                     sServerFacade.IsDistanceLessOrEqualThan(sServerFacade.getDistance2d(member, bot), sPlayerbotAIConfig.reactDistance)) return true;

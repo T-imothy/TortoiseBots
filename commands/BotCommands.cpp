@@ -1,3 +1,4 @@
+#include "../runtime/BotWorldActions.h"
 // pi-lens-ignore-file: all
 #include "BotCommands.h"
 // pi-lens-ignore: clang:pp_file_not_found
@@ -331,6 +332,7 @@ static bool HandleInvite(ChatHandler* handler, char const* args)
     bool joinedImmediately = false;
     if (PlayerbotAI* ai = PlayerbotAIStorage::Instance().GetAI(bot))
     {
+        BotWorldActions::WorldScope worldScope;
         ai::Event inviteEvent("group invite", "", requester);
         joinedImmediately = ai->DoSpecificAction("accept invitation", inviteEvent, true) &&
             bot->IsInSameGroupWith(requester);

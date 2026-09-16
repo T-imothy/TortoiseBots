@@ -1,9 +1,12 @@
+#include "playerbot/BotDiagnostics.h"
 
 #include "playerbot/playerbot.h"
 #include <stdarg.h>
 #include <iomanip>
+#include <memory>
 
 #include "Engine.h"
+#include "../../../runtime/BotWorldActions.h"
 #include "playerbot/PlayerbotAIConfig.h"
 // #include "playerbot/PerformanceMonitor.h" // E2E green
 #include "playerbot/BotActionLog.h"
@@ -84,6 +87,7 @@ ActionExecutionListeners::~ActionExecutionListeners()
 
 Engine::~Engine(void)
 {
+    worldContinuationEpoch.reset();
     Reset();
 
     strategies.clear();
@@ -98,6 +102,7 @@ bool Engine::Reset()
         return false;
     }
 
+    CancelWorldContinuation();
     ActionNode* action = NULL;
     do
     {
@@ -148,14 +153,12 @@ bool Engine::IsFailureBackedOff(Action* action, Event& event) const
     if (!AllowBackgroundRetry(action, event))
         return false;
     return actionFailures.IsBackedOff(FailureKey(action, event, ACTION_RESULT_FAILED),
-        WorldTimer::getMSTime()) ||
-        actionFailures.IsBackedOff(FailureKey(action, event, ACTION_RESULT_IMPOSSIBLE),
         WorldTimer::getMSTime());
 }
 
 void Engine::RecordFailure(Action* action, Event& event, ActionResult result)
 {
-    if (!AllowBackgroundRetry(action, event))
+    if (result != ACTION_RESULT_FAILED || !AllowBackgroundRetry(action, event))
         return;
     actionFailures.Record(FailureKey(action, event, result), WorldTimer::getMSTime(),
         sPlayerbotAIConfig.failedActionRetryBaseMs, sPlayerbotAIConfig.failedActionRetryMaxMs,
@@ -182,12 +185,16 @@ void Engine::RefreshFailureContext()
         return;
     // Any physical or resource change can unstick a failure: moved, looted,
     // healed, regained mana. Map changes clear through the transition path.
-    if (failX != bot->GetPositionX() || failY != bot->GetPositionY() || failZ != bot->GetPositionZ() ||
+    if (!sPlayerbotAIConfig.failedActionRetryBaseMs || !sPlayerbotAIConfig.failedActionRetryMaxMs ||
+        bot->IsInCombat() || ai->HasRealPlayerMaster() || ai->IsOwnedBot() ||
+        failureMapGeneration != bot->GetMapWorkGeneration() ||
+        failX != bot->GetPositionX() || failY != bot->GetPositionY() || failZ != bot->GetPositionZ() ||
         failMoney != bot->GetMoney() || failHealth != bot->GetHealth() ||
-        failMana != bot->GetPower(POWER_MANA))
+        failMana != bot->GetPower(bot->GetPowerType()))
         actionFailures.ClearAll();
+    failureMapGeneration = bot->GetMapWorkGeneration();
     failX = bot->GetPositionX(); failY = bot->GetPositionY(); failZ = bot->GetPositionZ();
-    failMoney = bot->GetMoney(); failHealth = bot->GetHealth(); failMana = bot->GetPower(POWER_MANA);
+    failMoney = bot->GetMoney(); failHealth = bot->GetHealth(); failMana = bot->GetPower(bot->GetPowerType());
     actionFailures.Prune(WorldTimer::getMSTime(), sPlayerbotAIConfig.failedActionCacheTtlMs);
 }
 
@@ -236,8 +243,34 @@ void Engine::Init()
 
 }
 
+bool Engine::ScheduleWorldContinuation(const Event& event, std::function<void(Engine&)> continuation)
+{
+    if (WorldContinuationPending())
+        return true;
+    auto pending = std::make_shared<int>(0);
+    std::weak_ptr<int> epoch = worldContinuationEpoch;
+    bool accepted = TortoiseBots::BotWorldActions::Instance().EnqueueContinuation(
+        ai->GetBot(), "engine continuation", event,
+        [this, epoch, pending, continuation = std::move(continuation)](PlayerbotAI& current)
+        {
+            // The queue validated the actor and native map generation first.
+            // Test the epoch before dereferencing the captured engine pointer.
+            if (epoch.expired())
+                return;
+            if (&current != ai)
+                return;
+            pendingWorldDecision.reset();
+            continuation(*this);
+        });
+    if (accepted)
+        pendingWorldDecision = pending;
+    return accepted;
+}
+
 bool Engine::DoNextAction(Unit* unit, int depth, bool minimal, bool isStunned)
 {
+    if (WorldContinuationPending())
+        return false;
     LogAction("--- AI Tick --- state=%s strats=%s", BotStateName(state), StrategySignature().c_str());
     if (sPlayerbotAIConfig.logValuesPerTick)
         LogValues();
@@ -256,6 +289,8 @@ bool Engine::DoNextAction(Unit* unit, int depth, bool minimal, bool isStunned)
     if (!tickBot)
         return false;
     uint32_t const tickMapId = tickBot->GetMapId();
+    uint64 const tickMapGeneration = tickBot->GetMapWorkGeneration();
+    uint64 const tickTransitionGeneration = ai->GetTransitionGeneration();
     TransitionTracker::Event const transition = transitions.Update(tickBot->IsInWorld(),
         tickBot->IsBeingTeleported(), tickMapId,
         tickBot->GetPositionX(), tickBot->GetPositionY(), tickBot->GetPositionZ(),
@@ -270,8 +305,23 @@ bool Engine::DoNextAction(Unit* unit, int depth, bool minimal, bool isStunned)
     }
     RefreshFailureContext();
 
-    bool const wasInDoNextAction = inDoNextAction;
-    inDoNextAction = true;
+    // A previous tick may have unwound after requesting a strategy rebuild.
+    // Retry on the owner, before evaluating another action; never rebuild from
+    // an exception-unwinding destructor.
+    if (!inDoNextAction && reinitPending)
+    {
+        Init();
+        reinitPending = false;
+    }
+
+    struct DecisionScope
+    {
+        bool& active;
+        bool const previous;
+        explicit DecisionScope(bool& flag) : active(flag), previous(flag) { active = true; }
+        void Restore() noexcept { active = previous; }
+        ~DecisionScope() { Restore(); }
+    } decisionScope(inDoNextAction);
 
     time_t currentTime = time(0);
     aiObjectContext->Update();
@@ -288,7 +338,9 @@ bool Engine::DoNextAction(Unit* unit, int depth, bool minimal, bool isStunned)
         // Stop the walk at that ownership boundary and mark the tracker away
         // so arrival drains even if the generation bump was somehow missed.
         // No reinit: queue stays for arrival.
-        if (!tickBot->IsInWorld() || tickBot->IsBeingTeleported() || tickBot->GetMapId() != tickMapId)
+        if (!tickBot->IsInWorld() || tickBot->IsBeingTeleported() || tickBot->GetMapId() != tickMapId ||
+            tickBot->GetMapWorkGeneration() != tickMapGeneration ||
+            ai->GetTransitionGeneration() != tickTransitionGeneration)
         {
             transitions.NoteAway();
             LogAction("transition mid-walk: stopping %s queue", BotStateName(state));
@@ -309,9 +361,29 @@ bool Engine::DoNextAction(Unit* unit, int depth, bool minimal, bool isStunned)
                 LogAction("minimal tick defers low-relevance queue");
                 break;
             }
+            // Keep the original basket, prerequisite flag, relevance and event.
+            // Resume the normal decision walk on the world owner; admission
+            // never invokes listeners, success continuers or failure backoff.
+            if (!event.HasExpiredOwner() && TortoiseBots::BotWorldActions::IsMapExecution())
+            {
+                Action* candidate = InitializeAction(basket->getAction());
+                if (candidate && candidate->RequiresWorldOwner())
+                {
+                    ScheduleWorldContinuation(event, [depth, minimal](Engine& engine)
+                    {
+                        if (engine.ai->GetCurrentEngine() != &engine)
+                            return; // A combat/death transition superseded this decision.
+                        Player* bot = engine.ai->GetBot();
+                        engine.DoNextAction(bot, depth, minimal, bot->IsTaxiFlying());
+                    });
+                    break; // Backpressure retains the same basket for retry.
+                }
+            }
             // NOTE: queue.Pop() deletes basket
-            ActionNode* actionNode = queue.Pop();
-            Action* action = InitializeAction(actionNode);
+            std::unique_ptr<ActionNode> actionNode(queue.Pop());
+            if (event.HasExpiredOwner())
+                continue;
+            Action* action = InitializeAction(actionNode.get());
 
             std::string actionName = (action ? action->getName() : "unknown");
             if (!event.getSource().empty())
@@ -383,24 +455,11 @@ bool Engine::DoNextAction(Unit* unit, int depth, bool minimal, bool isStunned)
                             }
                         }
                     }
-                    // Issue #84 (P1): the backoff gate runs before
-                    // prerequisites and the possibility check. A backing-off
-                    // background action is dropped here (not executed, no
-                    // alternatives, no prereq work). Its trigger re-fires
-                    // while the cause persists, so execution resumes on
-                    // expiry without queue churn.
-                    if (IsFailureBackedOff(action, event))
-                    {
-                        LogAction("A:%s - BACKOFF src=%s base=%.3f eff=%.3f", action->getName().c_str(), event.getSource().c_str(), oldRelevance, relevance);
-                        delete actionNode;
-                        continue;
-                    }
-
                     ActionBasket* peekAction = queue.Peek();
                     if (relevance < oldRelevance && peekAction && peekAction->getRelevance() > relevance) //Relevance changed. Try again.
                     {
                         modifiedActions.push_back(action);
-                        PushAgain(actionNode, relevance, event);
+                        PushAgain(actionNode.release(), relevance, event);
                         continue;
                     }
 
@@ -409,7 +468,7 @@ bool Engine::DoNextAction(Unit* unit, int depth, bool minimal, bool isStunned)
                         LogAction("A:%s - PREREQ src=%s base=%.3f eff=%.3f", action->getName().c_str(), event.getSource().c_str(), oldRelevance, relevance);
                         if (MultiplyAndPush(actionNode->getPrerequisites(), relevance + 0.02, false, event, "prereq"))
                         {
-                            PushAgain(actionNode, relevance + 0.01, event);
+                            PushAgain(actionNode.release(), relevance + 0.01, event);
                             continue;
                         }
                     }
@@ -420,6 +479,16 @@ bool Engine::DoNextAction(Unit* unit, int depth, bool minimal, bool isStunned)
 
                     if (isPossible && relevance)
                     {
+                        // Preserve native prerequisite/possibility evaluation. Only
+                        // repeated failed background execution is delayed.
+                        if (!AllowBackgroundRetry(action, event))
+                            ClearActionFailures(action, event);
+                        if (IsFailureBackedOff(action, event))
+                        {
+                            LogAction("A:%s - BACKOFF src=%s", action->getName().c_str(), event.getSource().c_str());
+                            MultiplyAndPush(actionNode->getAlternatives(), relevance + 0.03, false, event, "alt");
+                            continue;
+                        }
                         // E2E green: PerformanceMonitor stub
                         actionExecuted = ListenAndExecute(action, event);
 // E2E green: pmo stub
@@ -436,13 +505,15 @@ bool Engine::DoNextAction(Unit* unit, int depth, bool minimal, bool isStunned)
                             ClearActionFailures(action, event);
                             MultiplyAndPush(actionNode->getContinuers(), 0, false, event, "cont");
                             lastRelevance = relevance;
-                            delete actionNode;
                             break;
                         }
                         else
                         {
                             LogAction("A:%s - FAILED src=%s base=%.3f eff=%.3f", action->getName().c_str(), event.getSource().c_str(), oldRelevance, relevance);
-                            RecordFailure(action, event, ACTION_RESULT_FAILED);
+                            if (tickBot->IsInWorld() && !tickBot->IsBeingTeleported() &&
+                                tickBot->GetMapWorkGeneration() == tickMapGeneration &&
+                                ai->GetTransitionGeneration() == tickTransitionGeneration)
+                                RecordFailure(action, event, ACTION_RESULT_FAILED);
                             MultiplyAndPush(actionNode->getAlternatives(), relevance + 0.03, false, event, "alt");
                         }
                     }
@@ -471,7 +542,7 @@ bool Engine::DoNextAction(Unit* unit, int depth, bool minimal, bool isStunned)
                             }
                         }
                         LogAction("A:%s - IMPOSSIBLE src=%s base=%.3f eff=%.3f", action->getName().c_str(), event.getSource().c_str(), oldRelevance, relevance);
-                        RecordFailure(action, event, ACTION_RESULT_IMPOSSIBLE);
+                        ClearActionFailures(action, event); // Re-evaluate newly possible work immediately.
                         MultiplyAndPush(actionNode->getAlternatives(), relevance + 0.03, false, event, "alt");
                     }
                 }
@@ -500,10 +571,10 @@ bool Engine::DoNextAction(Unit* unit, int depth, bool minimal, bool isStunned)
                         }
                     }
                     lastRelevance = relevance;
+                    ClearActionFailures(action, event);
                     LogAction("A:%s - USELESS src=%s base=%.3f eff=%.3f", action->getName().c_str(), event.getSource().c_str(), oldRelevance, relevance);
                 }
             }
-            delete actionNode;
         }
     }
     while (basket && ++iterations <= iterationsPerTick);
@@ -536,11 +607,11 @@ bool Engine::DoNextAction(Unit* unit, int depth, bool minimal, bool isStunned)
 
     queue.RemoveExpired();
 
-    inDoNextAction = wasInDoNextAction;
+    decisionScope.Restore();
     if (!inDoNextAction && reinitPending)
     {
-        reinitPending = false;
         Init();
+        reinitPending = false;
     }
 
     return actionExecuted;
@@ -569,6 +640,9 @@ ActionNode* Engine::CreateActionNode(const std::string& name)
 
 bool Engine::MultiplyAndPush(NextAction** actions, float forceRelevance, bool skipPrerequisites, const Event& event, const char* pushType)
 {
+    // This overload owns the null-terminated input, including unvisited
+    // entries when action construction, logging or queue insertion throws.
+    std::unique_ptr<NextAction*, decltype(&NextAction::destroy)> ownedActions(actions, &NextAction::destroy);
     bool pushed = false;
     if (actions)
     {
@@ -577,8 +651,8 @@ bool Engine::MultiplyAndPush(NextAction** actions, float forceRelevance, bool sk
             NextAction* nextAction = actions[j];
             if (nextAction)
             {
-                ActionNode* actionNode = CreateActionNode(nextAction->getName());
-                InitializeAction(actionNode);
+                std::unique_ptr<ActionNode> actionNode(CreateActionNode(nextAction->getName()));
+                InitializeAction(actionNode.get());
 
                 bool shouldPush = false;
                 float k = nextAction->getRelevance();
@@ -605,20 +679,18 @@ bool Engine::MultiplyAndPush(NextAction** actions, float forceRelevance, bool sk
                 if (shouldPush)
                 {
                     LogAction("PUSH:%s - %f (%s) src=%s", actionNode->getName().c_str(), k, pushType, event.getSource().c_str());
-                    queue.Push(new ActionBasket(actionNode, k, skipPrerequisites, event));
+                    std::unique_ptr<ActionBasket> basket(new ActionBasket(actionNode.get(), k, skipPrerequisites, event));
+                    queue.Push(basket.get());
+                    // Queue owns both objects after insertion (or has deleted
+                    // both while merging a duplicate).
+                    basket.release();
+                    actionNode.release();
                     pushed = true;
                 }
-                else
-                {
-                    delete actionNode;
-                }
-
-                delete nextAction;
             }
             else
                 break;
         }
-        delete[] actions;
     }
     return pushed;
 }
@@ -626,25 +698,38 @@ bool Engine::MultiplyAndPush(NextAction** actions, float forceRelevance, bool sk
 bool Engine::MultiplyAndPush(const std::vector<NextAction>& actions, float forceRelevance,
                              bool skipPrerequisites, const Event& event, const char* pushType)
 {
-    NextAction** compatibleActions = new NextAction*[actions.size() + 1];
+    std::unique_ptr<NextAction*, decltype(&NextAction::destroy)> compatibleActions(
+        new NextAction*[actions.size() + 1](), &NextAction::destroy);
     size_t index = 0;
     for (const NextAction& action : actions)
-        compatibleActions[index++] = new NextAction(action);
+        compatibleActions.get()[index++] = new NextAction(action);
 
-    compatibleActions[index] = NULL;
-    return MultiplyAndPush(compatibleActions, forceRelevance, skipPrerequisites, event, pushType);
+    return MultiplyAndPush(compatibleActions.release(), forceRelevance, skipPrerequisites, event, pushType);
 }
 
 ActionResult Engine::ExecuteAction(const std::string& name, Event& event)
 {
+    if (event.HasExpiredOwner())
+        return ACTION_RESULT_FAILED;
     ActionResult actionResult = ACTION_RESULT_UNKNOWN;
-    ActionNode* actionNode = CreateActionNode(name);
+    std::unique_ptr<ActionNode> actionNode(CreateActionNode(name));
     if (actionNode)
     {
         // E2E green: PerformanceMonitor stub
-        Action* action = InitializeAction(actionNode);
+        Action* action = InitializeAction(actionNode.get());
         if (action)
         {
+            if (action->RequiresWorldOwner() && TortoiseBots::BotWorldActions::IsMapExecution())
+            {
+                // Commands preserve their own event and queue order, without
+                // replacing an already pending autonomous decision.
+                bool queued = TortoiseBots::BotWorldActions::Instance().EnqueueContinuation(
+                    ai->GetBot(), name, event, [name, event](PlayerbotAI& current)
+                    {
+                        current.DoSpecificAction(name, event, true);
+                    });
+                return queued ? ACTION_RESULT_DEFERRED : ACTION_RESULT_FAILED;
+            }
             // Issue #84: an explicit command acts without delay, even when
             // the same background action is backing off. No backoff gate on
             // this path by design.
@@ -666,7 +751,8 @@ ActionResult Engine::ExecuteAction(const std::string& name, Event& event)
                     bool executionResult = ListenAndExecute(action, event);
 // E2E green: pmo stub
 
-                    MultiplyAndPush(action->getContinuers(), 0.0f, false, event, "default");
+                    if (executionResult)
+                        MultiplyAndPush(action->getContinuers(), 0.0f, false, event, "default");
                     actionResult = executionResult ? ACTION_RESULT_OK : ACTION_RESULT_FAILED;
                 }
                 else
@@ -679,7 +765,6 @@ ActionResult Engine::ExecuteAction(const std::string& name, Event& event)
                 actionResult = ACTION_RESULT_USELESS;
             }
         }
-        delete actionNode;
     }
 
     return actionResult;
@@ -687,28 +772,33 @@ ActionResult Engine::ExecuteAction(const std::string& name, Event& event)
 
 bool Engine::QueueAction(const std::string& name, float relevance, const Event& event)
 {
-    ActionNode* actionNode = CreateActionNode(name);
+    if (event.HasExpiredOwner())
+        return false;
+    std::unique_ptr<ActionNode> actionNode(CreateActionNode(name));
     if (!actionNode)
         return false;
 
-    if (!InitializeAction(actionNode))
+    if (!InitializeAction(actionNode.get()))
     {
-        delete actionNode;
         return false;
     }
 
-    queue.Push(new ActionBasket(actionNode, relevance, false, event));
+    std::unique_ptr<ActionBasket> basket(new ActionBasket(actionNode.get(), relevance, false, event));
+    queue.Push(basket.get());
+    basket.release();
+    actionNode.release();
     return true;
 }
 
 bool Engine::CanExecuteAction(const std::string& name, bool isUseful, bool isPossible)
 {
     bool result = true;
-    ActionNode* actionNode = CreateActionNode(name);
+    std::unique_ptr<ActionNode> actionNode(CreateActionNode(name));
     if (actionNode)
     {
-        Action* action = InitializeAction(actionNode);
-        if (action)
+        Action* action = InitializeAction(actionNode.get());
+        if (!action || (action->RequiresWorldOwner() && TortoiseBots::BotWorldActions::IsMapExecution()))
+            return false;
         {
             if (isUseful)
             {
@@ -721,10 +811,9 @@ bool Engine::CanExecuteAction(const std::string& name, bool isUseful, bool isPos
             }
         }
 
-        delete actionNode;
     }
 
-    return result;
+    return actionNode && result;
 }
 
 void Engine::addStrategy(const std::string& name)
@@ -906,11 +995,11 @@ std::list<std::string_view> Engine::GetStrategies()
 
 void Engine::PushAgain(ActionNode* actionNode, float relevance, const Event& event)
 {
-    NextAction** nextAction = new NextAction*[2];
-    nextAction[0] = new NextAction(actionNode->getName(), relevance);
-    nextAction[1] = NULL;
-    MultiplyAndPush(nextAction, relevance, true, event, "again");
-    delete actionNode;
+    // Both engine walks transfer their popped node here. Keep ownership
+    // through requeue failures as well as successful replacement.
+    std::unique_ptr<ActionNode> ownedNode(actionNode);
+    MultiplyAndPush(std::vector<NextAction>{NextAction(actionNode->getName(), relevance)},
+        relevance, true, event, "again");
 }
 
 bool Engine::ContainsStrategy(StrategyType type)
@@ -943,14 +1032,18 @@ Action* Engine::InitializeAction(ActionNode* actionNode)
 
 bool Engine::ListenAndExecute(Action* action, Event& event)
 {
+    if (event.HasExpiredOwner())
+        return false;
     bool actionExecuted = false;
     Action* prevExecutedAction = lastExecutedAction;
+    std::string lastActionName = prevExecutedAction ? prevExecutedAction->getName() : "";
     if (actionExecutionListeners.Before(action, event))
     {
         ai->SetLastEvent(event);
-        sLog.outString("TortoiseBots AI: Engine executing Action=%s Trigger=%s bot=%s",
-        action->getName().c_str(), event.getSource().c_str(), ai->GetBot()->GetName());
-    actionExecuted = actionExecutionListeners.AllowExecution(action, event) ? action->Execute(event) : true;
+        if (botdiag::IsActionLogEnabled() || sPlayerbotAIConfig.CanLogAction(ai, action->getName(), true, lastActionName))
+            sLog.outString("TortoiseBots AI: Engine executing Action=%s Trigger=%s bot=%s",
+                action->getName().c_str(), event.getSource().c_str(), ai->GetBot()->GetName());
+        actionExecuted = actionExecutionListeners.AllowExecution(action, event) ? action->Execute(event) : true;
         if (actionExecuted)
         {
             ai->SetActionDuration(action);
@@ -958,7 +1051,6 @@ bool Engine::ListenAndExecute(Action* action, Event& event)
         }
     }
 
-    std::string lastActionName = prevExecutedAction ? prevExecutedAction->getName() : "";
     if (sPlayerbotAIConfig.CanLogAction(ai, action->getName(), true, lastActionName))
     {
         std::ostringstream out;
@@ -1023,6 +1115,8 @@ void Engine::LogAction(const char* format, ...)
     va_start(ap, format);
     vsnprintf(buf, sizeof(buf), format, ap);
     va_end(ap);
+    if (sPlayerbotAIConfig.behaviorTrace && buf[0] == 'A' && buf[1] == ':' && !strstr(buf, "USELESS"))
+        ai::botdiag::TraceBehavior(ai, "action", buf);
     lastAction += "|";
     lastAction += buf;
     if (lastAction.size() > 512)

@@ -16,8 +16,8 @@ Event Trigger::Check()
 {
 	if (triggered)
 	{
-		if (owner)
-			return Event(getName(), param, owner);
+		if (!externalEvent.getSource().empty())
+			return externalEvent;
 		else
 			return Event(getName());
 	}

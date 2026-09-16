@@ -107,6 +107,10 @@ bool QuestRelationTravelDestination::IsPossible(const PlayerTravelInfo& info) co
     if (!info.GetBoolValue2("has strategy", "rpg quest"))
         return false;
 
+    // Never send bots to challenge quest givers (e.g. Mysterious Stranger)
+    if (GetEntry() == 81030 || GetEntry() == 62609 || GetQuestId() == 80388)
+        return false;
+
     bool forceThisQuest = info.HasFocusQuest();
 
     if (forceThisQuest && !info.IsFocusQuest(GetQuestId()))
@@ -152,6 +156,18 @@ bool QuestRelationTravelDestination::IsPossible(const PlayerTravelInfo& info) co
             if (IsOverWorld(info.getPosition()))
                 return false;
         }
+    }
+
+    // Don't send a bot to a quest giver in a zone far above its level, or cross-zone for lowbies
+    WorldPosition* point = GetClosestPoint(info.getPosition());
+    if (point)
+    {
+        int32 destAreaLevel = point->GetAreaLevel();
+        if (destAreaLevel > 0 && destAreaLevel > (int32)info.GetLevel() + 5)
+            return false;
+
+        if (info.GetLevel() <= 5 && point->distance(info.getPosition()) > 1500.0f)
+            return false;
     }
 
     return true;
@@ -223,6 +239,9 @@ std::string QuestRelationTravelDestination::GetTitle() const {
 
 bool QuestObjectiveTravelDestination::IsPossible(const PlayerTravelInfo& info) const
 {
+    if (GetEntry() == 81030 || GetEntry() == 62609 || GetQuestId() == 80388)
+        return false;
+
     if (!info.GetBoolValue2("has strategy", "rpg quest"))
         return false;
 
@@ -302,6 +321,18 @@ bool QuestObjectiveTravelDestination::IsPossible(const PlayerTravelInfo& info) c
             if (!IsOverWorld(info.getPosition()))
                 return false;
         }
+    }
+
+    // Don't send a bot to a quest objective in a zone far above its level, or cross-zone for lowbies
+    WorldPosition* point = GetClosestPoint(info.getPosition());
+    if (point)
+    {
+        int32 destAreaLevel = point->GetAreaLevel();
+        if (destAreaLevel > 0 && destAreaLevel > (int32)info.GetLevel() + 5)
+            return false;
+
+        if (info.GetLevel() <= 5 && point->distance(info.getPosition()) > 1500.0f)
+            return false;
     }
 
     return true;
@@ -409,9 +440,21 @@ bool RpgTravelDestination::IsPossible(const PlayerTravelInfo& info) const
     // spiral at the local high-level graveyard. Mirrors the grind-target level gate
     // (GrindTravelDestination::IsPossible). Margin matches the quest-level gate (+5).
     // getAreaLevel() returns -1/-2 for unknown areas; only reject on a real level.
-    int32 destAreaLevel = GuidPosition(HIGHGUID_UNIT, GetEntry()).GetAreaLevel();
-    if (destAreaLevel > 0 && destAreaLevel > (int32)info.GetLevel() + 5)
-        return false;
+    WorldPosition* point = GetClosestPoint(info.getPosition());
+    if (point)
+    {
+        AreaTableEntry const* area = point->GetArea();
+        uint32 zoneId = area ? (area->ZoneId ? area->ZoneId : area->Id) : 0;
+        if (zoneId == 5536 || zoneId == 5225)
+            return false;
+
+        int32 destAreaLevel = point->GetAreaLevel();
+        if (destAreaLevel > 0 && destAreaLevel > (int32)info.GetLevel() + 5)
+            return false;
+
+        if (info.GetLevel() <= 5 && point->distance(info.getPosition()) > 1500.0f)
+            return false;
+    }
 
     //Horde pvp baracks
     if (ClosestMapId(info.getPosition()) == 450 && info.GetTeam() == ALLIANCE)
@@ -509,6 +552,12 @@ AreaTableEntry const* ZoneTravelDestination::GetArea() const
 bool ExploreTravelDestination::IsPossible(const PlayerTravelInfo& info) const
 {
     AreaTableEntry const* area = GetArea();
+    if (!area)
+        return false;
+
+    uint32 zoneId = area->ZoneId ? area->ZoneId : area->Id;
+    if (zoneId == 5536 || zoneId == 5225)
+        return false;
 
     if (GetLevel() && (uint32)GetLevel() > info.GetLevel() && info.GetLevel() < DEFAULT_MAX_LEVEL)
         return false;
@@ -549,6 +598,16 @@ bool GrindTravelDestination::IsPossible(const PlayerTravelInfo& info) const
 
     int32 maxLevel = std::max(botLevel * (0.5f + levelMod), botLevel - 5.0f + levelBoost);
 
+    // Beginners (level 1-4): the band above truncates to 0 at level 1 (and to 1-2 at
+    // levels 2-4), and the gold rule below rejects every beast - so a fresh bot in an
+    // enclosed starting valley (Valley of Trials, Camp Narache: nothing but boars and
+    // scorpids, gold 0) never finds a single grind target and idles at the campfire,
+    // which RpgTravelDestination forbids it to leave below level 5. Let beginners fight
+    // their own level and coinless starter beasts; from level 5 on nothing changes.
+    bool const beginner = botLevel <= 4;
+    if (beginner)
+        maxLevel = std::max(maxLevel, botLevel);
+
     if ((int32)cInfo->level_max > maxLevel) //@lvl5 max = 3, @lvl60 max = 57
         return false;
 
@@ -557,11 +616,28 @@ bool GrindTravelDestination::IsPossible(const PlayerTravelInfo& info) const
     if ((int32)cInfo->level_max < minLevel) //@lvl5 min = 3, @lvl60 max = 50
         return false;
 
-    if (cInfo->gold_min == 0)
+    if (cInfo->gold_min == 0 && (!beginner || cInfo->type == CREATURE_TYPE_CRITTER))
         return false;
 
     if (cInfo->rank > CREATURE_ELITE_NORMAL && !info.GetBoolValue("can fight elite"))
         return false;
+
+    // Don't send a bot to a grind creature located in a zone far above its level
+    WorldPosition* point = GetClosestPoint(info.getPosition());
+    if (point)
+    {
+        AreaTableEntry const* area = point->GetArea();
+        uint32 zoneId = area ? (area->ZoneId ? area->ZoneId : area->Id) : 0;
+        if (zoneId == 5536 || zoneId == 5225)
+            return false;
+
+        int32 destAreaLevel = point->GetAreaLevel();
+        if (destAreaLevel > 0 && destAreaLevel > (int32)info.GetLevel() + 5)
+            return false;
+
+        if (info.GetLevel() <= 5 && point->distance(info.getPosition()) > 1500.0f)
+            return false;
+    }
 
     return true;
 }
@@ -731,6 +807,17 @@ bool GatherTravelDestination::IsPossible(const PlayerTravelInfo& info) const
 
     if (GetPurpose() != TravelDestinationPurpose::GatherFishing && reqSkillValue + 100 < skillValue) //Gray level = no skillup
         return false;
+
+    WorldPosition* point = GetClosestPoint(info.getPosition());
+    if (point)
+    {
+        int32 destAreaLevel = point->GetAreaLevel();
+        if (destAreaLevel > 0 && destAreaLevel > (int32)info.GetLevel() + 5)
+            return false;
+
+        if (info.GetLevel() <= 5 && point->distance(info.getPosition()) > 1500.0f)
+            return false;
+    }
 
     return true;
 }
@@ -1032,6 +1119,10 @@ void TravelMgr::Clear()
 
 int32 TravelMgr::GetAreaLevel(uint32 area_id)
 {
+    // Async destination workers share this lazy cache. Parent/sub-area lookup
+    // re-enters the method; never publish an intermediate recursion sentinel
+    // or let a hash-table insertion race a reader.
+    std::lock_guard<std::recursive_mutex> lock(areaLevelsMutex);
     auto lev = areaLevels.find(area_id);
 
     if (lev != areaLevels.end())
@@ -1128,6 +1219,7 @@ int32 TravelMgr::GetAreaLevel(uint32 area_id)
 
 bool TravelMgr::TryGetValidatedAreaLevel(uint32 areaId, int32& outLevel) const
 {
+    std::lock_guard<std::recursive_mutex> lock(areaLevelsMutex);
     auto it = areaLevels.find(areaId);
     if (it != areaLevels.end() && it->second > 0)
     {
@@ -1165,6 +1257,7 @@ bool TravelMgr::TryGetValidatedAreaLevel(uint32 areaId, int32& outLevel) const
 
 void TravelMgr::LoadAreaLevels()
 {
+    std::lock_guard<std::recursive_mutex> lock(areaLevelsMutex);
     if (!areaLevels.empty())
         return;
 
@@ -2279,6 +2372,11 @@ bool TravelMgr::IsLocationLevelValid(const WorldPosition& position, const Player
 PartitionedTravelList TravelMgr::GetPartitions(const WorldPosition& center, const std::vector<uint32>& distancePartitions, const PlayerTravelInfo& info, uint32 purposeFlag, const std::vector<int32>& entries, bool onlyPossible, float maxDistance) const
 {
     sTravelMgr.GetPartitionsLock();
+    // Return the native worker permit even if destination lookup/allocation throws.
+    struct PartitionPermitRelease
+    {
+        ~PartitionPermitRelease() { sTravelMgr.GetPartitionsLock(false); }
+    } permitRelease;
 
     PartitionedTravelList pointMap;
     DestinationList destinations = GetDestinations(info, purposeFlag, entries, onlyPossible, maxDistance);
@@ -2314,6 +2412,7 @@ PartitionedTravelList TravelMgr::GetPartitions(const WorldPosition& center, cons
         unsigned const pointSeed = MixTravelRouteSeed(seed ^ pointRange.first);
         std::shuffle(points.begin(), points.end(), std::default_random_engine(pointSeed));
 
+        float minDistance = FLT_MAX;
         for (auto& position : points)
         {
             if (!IsLocationLevelValid(*position, info, purposeFlag))
@@ -2332,7 +2431,17 @@ PartitionedTravelList TravelMgr::GetPartitions(const WorldPosition& center, cons
                 continue;
             }
 
-            point = TravelPoint(dest, position, distance);
+            if (info.GetLevel() <= 5 && distance > 1500.0f)
+            {
+                probeRejectDistance++;
+                continue;
+            }
+
+            if (distance < minDistance)
+            {
+                minDistance = distance;
+                point = TravelPoint(dest, position, distance);
+            }
         }
 
         if (std::get<2>(point) > 0)
@@ -2346,7 +2455,6 @@ PartitionedTravelList TravelMgr::GetPartitions(const WorldPosition& center, cons
             info.GetLevel(), probeTotal, probeNoPartition, probeNoPoint,
             probeRejectLevel, probeRejectDistance, maxDistance, probeFarthest);
 
-    sTravelMgr.GetPartitionsLock(false);
 
     return pointMap;
 }

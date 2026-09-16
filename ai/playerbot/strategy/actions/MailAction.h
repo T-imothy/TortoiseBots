@@ -22,6 +22,7 @@ namespace ai
     class MailAction : public ChatCommandAction
     {
     public:
+        bool RequiresWorldOwner() const override { return true; }
         MailAction(PlayerbotAI* ai) : ChatCommandAction(ai, "mail") {}
         virtual bool Execute(Event& event) override;
 

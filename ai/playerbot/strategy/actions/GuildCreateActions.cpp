@@ -1,3 +1,4 @@
+#include "runtime/BotWorldActions.h"
 
 #include "playerbot/playerbot.h"
 #include "GuildCreateActions.h"
@@ -11,6 +12,9 @@ using namespace ai;
 
 bool BuyPetitionAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
+
     std::list<ObjectGuid> vendors = ai->GetAiObjectContext()->GetValue<std::list<ObjectGuid> >("nearest npcs")->Get();
     bool vendored = false, result = false;
     for (std::list<ObjectGuid>::iterator i = vendors.begin(); i != vendors.end(); ++i)
@@ -101,6 +105,9 @@ bool BuyPetitionAction::canBuyPetition(Player* bot)
 
 bool PetitionOfferAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
+
     uint32 petitionEntry = 5863; //GUILD_CHARTER
     std::list<Item*> petitions = AI_VALUE2(std::list<Item*>, "inventory items", chat->formatQItem(5863));
 
@@ -152,6 +159,9 @@ bool PetitionOfferAction::Execute(Event& event)
 
 bool PetitionOfferNearbyAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
+
     uint32 found = 0;
 
     std::list<ObjectGuid> nearGuids = ai->GetAiObjectContext()->GetValue<std::list<ObjectGuid> >("nearest friendly players")->Get();
@@ -208,6 +218,9 @@ bool PetitionOfferNearbyAction::Execute(Event& event)
 
 bool PetitionTurnInAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
+
     Player* requester = event.GetOwner() ? event.GetOwner() : GetMaster();
     std::list<ObjectGuid> vendors = ai->GetAiObjectContext()->GetValue<std::list<ObjectGuid> >("nearest npcs")->Get();
     bool vendored = false, result = false;
@@ -312,6 +325,9 @@ bool PetitionTurnInAction::isUseful()
 
 bool BuyTabardAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
+
     Player* requester = event.GetOwner() ? event.GetOwner() : GetMaster();
     bool canBuy = ai->DoSpecificAction("buy", Event("buy tabard", "|cHitem:5976:|r"),true);
 

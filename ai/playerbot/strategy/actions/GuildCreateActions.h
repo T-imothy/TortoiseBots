@@ -12,6 +12,7 @@ namespace ai
     class BuyPetitionAction : public Action
     {
     public:
+        bool RequiresWorldOwner() const override { return true; }
         BuyPetitionAction(PlayerbotAI* ai) : Action(ai, "buy petition") {}
         virtual bool Execute(Event& event) override;
         virtual bool isUseful() override;
@@ -21,6 +22,7 @@ namespace ai
     class PetitionOfferAction : public Action
     {
     public:
+        bool RequiresWorldOwner() const override { return true; }
         PetitionOfferAction(PlayerbotAI* ai, std::string name = "petition offer") : Action(ai, name) {}
         virtual bool Execute(Event& event) override;
         virtual bool isUseful() override
@@ -55,6 +57,7 @@ namespace ai
     class PetitionTurnInAction : public ChooseTravelTargetAction
     {
     public:
+        bool RequiresWorldOwner() const override { return true; }
         PetitionTurnInAction(PlayerbotAI* ai) : ChooseTravelTargetAction(ai, "turn in petition") {}
         virtual bool Execute(Event& event) override;
         virtual bool isUseful() override;
@@ -63,6 +66,7 @@ namespace ai
     class BuyTabardAction : public ChooseTravelTargetAction
     {
     public:
+        bool RequiresWorldOwner() const override { return true; }
         BuyTabardAction(PlayerbotAI* ai) : ChooseTravelTargetAction(ai, "buy tabard") {}
         virtual bool Execute(Event& event) override;
         virtual bool isUseful() override;

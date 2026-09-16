@@ -1,5 +1,6 @@
 #pragma once
 #include "playerbot/PlayerbotAI.h"
+#include "runtime/BotWorldActions.h"
 #include "playerbot/ServerFacade.h"
 #include "playerbot/strategy/values/Formations.h"
 
@@ -10,10 +11,14 @@ namespace ai
     class AcceptInvitationAction : public Action
     {
     public:
+        bool RequiresWorldOwner() const override { return true; }
         AcceptInvitationAction(PlayerbotAI* ai) : Action(ai, "accept invitation") {}
 
         virtual bool Execute(Event& event) override
         {
+            if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+                return *deferred;
+
             Group* grp = bot->GetGroupInvite();
             if (!grp)
             {

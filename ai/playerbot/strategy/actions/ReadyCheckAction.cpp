@@ -1,6 +1,8 @@
+#include "runtime/BotWorldActions.h"
 
 #include "playerbot/playerbot.h"
 #include "ReadyCheckAction.h"
+#include <mutex>
 #include "playerbot/PlayerbotAIConfig.h"
 #include "playerbot/ServerFacade.h"
 
@@ -141,6 +143,9 @@ public:
 
 bool ReadyCheckAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
+
     Player* requester = event.GetOwner() ? event.GetOwner() : GetMaster();
     WorldPacket p = event.GetPacket();
     ObjectGuid player;
@@ -157,7 +162,8 @@ bool ReadyCheckAction::Execute(Event& event)
 
 bool ReadyCheckAction::ReadyCheck(Player* requester)
 {
-    if (ReadyChecker::checkers.empty())
+    static std::once_flag initialized;
+    std::call_once(initialized, []
     {
         ReadyChecker::checkers.push_back(new HealthChecker());
         ReadyChecker::checkers.push_back(new ManaChecker());
@@ -168,7 +174,7 @@ bool ReadyCheckAction::ReadyCheck(Player* requester)
         ReadyChecker::checkers.push_back(new ManaPotionChecker("drink", "Water"));
         ReadyChecker::checkers.push_back(new ItemCountChecker("healing potion", "Hpot"));
         ReadyChecker::checkers.push_back(new ManaPotionChecker("mana potion", "Mpot"));
-    }
+    });
 
     bool result = true;
     for (std::list<ReadyChecker*>::iterator i = ReadyChecker::checkers.begin(); i != ReadyChecker::checkers.end(); ++i)
@@ -211,6 +217,9 @@ bool ReadyCheckAction::ReadyCheck(Player* requester)
 
 bool FinishReadyCheckAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
+
     Player* requester = event.GetOwner() ? event.GetOwner() : GetMaster();
     return ReadyCheck(requester);
 }

@@ -1,3 +1,4 @@
+#include "runtime/BotWorldActions.h"
 #include "playerbot/playerbot.h"
 #include "GuildShareAhBuyAction.h"
 #include "host/AuctionHouseAdapter.h"
@@ -184,11 +185,15 @@ std::map<uint32, uint32> GuildShareAhBuyAction::GetNeededItems()
 
 bool GuildShareAhBuyAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
+
     Unit* auctioneer = FindNearbyAuctioneer();
     if (!auctioneer)
         return false;
 
-    if (!sRandomBotFacade.m_ahActionMutex.try_lock())
+    std::unique_lock<std::mutex> auctionLock(sRandomBotFacade.m_ahActionMutex, std::try_to_lock);
+    if (!auctionLock.owns_lock())
         return false;
 
     bool bought = false;
@@ -196,21 +201,18 @@ bool GuildShareAhBuyAction::Execute(Event& event)
     AuctionHouseEntry const* ahEntry = AuctionHouseMgr::GetAuctionHouseEntry(auctioneer);
     if (!ahEntry)
     {
-        sRandomBotFacade.m_ahActionMutex.unlock();
         return false;
     }
 
     AuctionHouseObject* auctionHouse = sAuctionMgr.GetAuctionsMap(ahEntry);
     if (!auctionHouse)
     {
-        sRandomBotFacade.m_ahActionMutex.unlock();
         return false;
     }
 
     std::map<uint32, uint32> neededItems = GetNeededItems();
     if (neededItems.empty())
     {
-        sRandomBotFacade.m_ahActionMutex.unlock();
         return false;
     }
 
@@ -315,6 +317,5 @@ bool GuildShareAhBuyAction::Execute(Event& event)
 
     }
 
-    sRandomBotFacade.m_ahActionMutex.unlock();
     return bought;
 }

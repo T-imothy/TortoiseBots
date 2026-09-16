@@ -15,8 +15,10 @@ public:
     void OnStartup() override;
     void OnUpdate(uint32 diff) override;
     void OnShutdown() override;
+    void OnAfterConfigLoad(bool reload) override;
 
 private:
+    bool m_active = false;
     uint32 m_ticks = 0;
 };
 

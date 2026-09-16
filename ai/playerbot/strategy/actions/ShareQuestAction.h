@@ -7,6 +7,7 @@ namespace ai
     class ShareQuestAction : public ChatCommandAction
     {
     public:
+        bool RequiresWorldOwner() const override { return true; }
         ShareQuestAction(PlayerbotAI* ai, std::string name = "share quest") : ChatCommandAction(ai, name) {}
         virtual bool Execute(Event& event) override;
         virtual bool isUsefulWhenStunned() override { return true; }
@@ -15,6 +16,7 @@ namespace ai
     class AutoShareQuestAction : public ShareQuestAction
     {
     public:
+        bool RequiresWorldOwner() const override { return true; }
         AutoShareQuestAction(PlayerbotAI* ai) : ShareQuestAction(ai, "auto share quest") {}
         virtual bool Execute(Event& event) override;
         virtual bool isUsefulWhenStunned() override { return true; }

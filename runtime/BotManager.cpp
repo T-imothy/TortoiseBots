@@ -1,10 +1,15 @@
+#include "Guild/Guild.h"
+#include "Guild/GuildMgr.h"
+#include "NativeGuildTrades.h"
 #include "BotManager.h"
 #include "BotActivityLease.h"
+#include "BotWorldActions.h"
 #include "PlayerbotAIAdapter.h"
 #include "PlayerbotAIStorage.h"
 #include "GearSeedingGuard.h"
 #include "../ai/playerbot/PlayerbotAI.h"
 #include "../ai/playerbot/RandomBotFacade.h"
+#include "../ai/playerbot/PlayerbotFactory.h"
 #include "../host/BotSessionAdapter.h"
 #include "../commands/BotCommands.h"
 // pi-lens-ignore: clang:pp_file_not_found
@@ -32,6 +37,7 @@
 #include "../ai/playerbot/strategy/values/TravelValues.h"
 
 #include "Database/DatabaseEnv.h"
+#include "../host/ModuleLog.h"
 
 #include <algorithm>
 
@@ -63,7 +69,9 @@ bool IsUsableTeleportPoint(ai::WorldPosition const& point)
 // Probes GenericRpg destinations in the bot's ±5 validated level window and
 // returns a terrain-validated point. Destinations stay TravelMgr-owned.
 // Returns nullptr on any miss (fail-closed, original position retained).
-ai::WorldPosition const* PickLevelFittingPoint(::Player* bot)
+ai::WorldPosition const* PickLevelFittingPoint(::Player* bot,
+    ai::TravelDestinationPurpose purpose = ai::TravelDestinationPurpose::GenericRpg,
+    float maxDistance = 0, bool innkeeper = false, bool checkPossible = false)
 {
     if (!bot)
         return nullptr;
@@ -76,10 +84,18 @@ ai::WorldPosition const* PickLevelFittingPoint(::Player* bot)
     ai::PlayerTravelInfo info(bot);
     // Fetch without level filtering (onlyPossible=false) and without distance bias (maxDistance=0)
     // to avoid lazy IsPossible scans and to scatter across all level-appropriate zones, not just near logout pos.
-    auto dests = travelMgr.GetDestinations(info, (uint32)ai::TravelDestinationPurpose::GenericRpg, {}, false, 0);
+    auto dests = travelMgr.GetDestinations(info, (uint32)purpose, {}, false, maxDistance);
+    // Filter cheap immutable NPC metadata before the bounded terrain probes.
+    // Otherwise rare inns compete with every RPG NPC for just 32 attempts.
+    if (innkeeper)
+        dests.erase(std::remove_if(dests.begin(), dests.end(), [](ai::TravelDestination* destination)
+        {
+            auto* entry = dynamic_cast<ai::EntryTravelDestination*>(destination);
+            return !entry || !entry->GetCreatureInfo() || !entry->HasNpcFlag(UNIT_NPC_FLAG_INNKEEPER);
+        }), dests.end());
     if (dests.empty())
     {
-        sLog.outString("TortoiseBots: random teleport no GenericRpg destinations for bot %s level %u", bot->GetName(), bot->GetLevel());
+        TB_LOG_DETAIL("TortoiseBots: random teleport no GenericRpg destinations for bot %s level %u", bot->GetName(), bot->GetLevel());
         return nullptr;
     }
 
@@ -104,16 +120,31 @@ ai::WorldPosition const* PickLevelFittingPoint(::Player* bot)
     if (upper > 60) upper = 60;
     for (uint32 destinationAttempt = 0; destinationAttempt < destinationAttempts && !chosen; ++destinationAttempt)
     {
-        ai::TravelDestination* destination = dests[urand(0, static_cast<uint32>(dests.size() - 1))];
+        std::swap(dests[destinationAttempt], dests[urand(destinationAttempt, static_cast<uint32>(dests.size() - 1))]);
+        ai::TravelDestination* destination = dests[destinationAttempt];
         if (!destination)
             continue;
+        if (checkPossible)
+        {
+            auto* entry = dynamic_cast<ai::EntryTravelDestination*>(destination);
+            if (!entry || !entry->GetCreatureInfo() || !destination->IsPossible(info)) continue;
+            ai::GuidPosition creature(HIGHGUID_UNIT, destination->GetEntry());
+            if (purpose == ai::TravelDestinationPurpose::GenericRpg && creature.IsHostileTo(bot)) continue;
+            if (innkeeper && !entry->HasNpcFlag(UNIT_NPC_FLAG_INNKEEPER)) continue;
+        }
 
         auto points = destination->GetPoints();
         uint32 pointAttempts = std::min<uint32>(maxPointAttempts, points.size());
         for (uint32 pointAttempt = 0; pointAttempt < pointAttempts; ++pointAttempt)
         {
-            ai::WorldPosition* point = points[urand(0, static_cast<uint32>(points.size() - 1))];
+            std::swap(points[pointAttempt], points[urand(pointAttempt, static_cast<uint32>(points.size() - 1))]);
+            ai::WorldPosition* point = points[pointAttempt];
             if (!point)
+                continue;
+            // A destination can contain both nearby and distant spawn points.
+            // Its nearest-point query cannot validate the point chosen here.
+            if (maxDistance > 0 && (point->getMapId() != bot->GetMapId() ||
+                point->sqDistance(info.getPosition()) > maxDistance * maxDistance))
                 continue;
             // Reject unresolved area flag rather than silently using linkedZone fallback
             // from GetByAreaFlagAndMap. Allow safe parent-zone cached lookup via helper.
@@ -121,6 +152,9 @@ ai::WorldPosition const* PickLevelFittingPoint(::Player* bot)
                 continue;
             AreaTableEntry const* area = point->GetArea();
             if (!area)
+                continue;
+            uint32 zoneId = area->ZoneId ? area->ZoneId : area->Id;
+            if (zoneId == 5536 || zoneId == 5225)
                 continue;
             if (point->IsEnemyHomeZoneFor(info.GetTeam()))
                 continue;
@@ -139,7 +173,7 @@ ai::WorldPosition const* PickLevelFittingPoint(::Player* bot)
 
     if (!chosen)
     {
-        sLog.outString("TortoiseBots: random teleport no valid overworld point for bot %s level %u", bot->GetName(), bot->GetLevel());
+        TB_LOG_DETAIL("TortoiseBots: random teleport no valid overworld point for bot %s level %u", bot->GetName(), bot->GetLevel());
         return nullptr;
     }
     return chosen;
@@ -153,9 +187,10 @@ bool TryRandomTeleport(::Player* bot, BotRecord const& record)
         return false;
     if (!record.random)
         return false;
-    // Match the existing RPG travel safety gate: low-level bots must not be
-    // scattered into NPC travel routes before they can survive the journey.
-    if (bot->GetLevel() < 5)
+    // Low-level bots are not scattered at all: below level 10 their quests are in the
+    // starting area and a level-fitting inn elsewhere (a capital, say) puts zones they
+    // cannot cross between them and their work.
+    if (bot->GetLevel() < 10)
         return false;
     if (bot->IsBeingTeleported())
         return false;
@@ -163,13 +198,13 @@ bool TryRandomTeleport(::Player* bot, BotRecord const& record)
         return false;
     if (sRandomBotFacade.IsPinnedBot(bot->GetGUIDLow()))
     {
-        sLog.outString("TortoiseBots: random teleport skipped pinned bot %s", bot->GetName());
+        TB_LOG_DEBUG("TortoiseBots: random teleport skipped pinned bot %s", bot->GetName());
         return false;
     }
     ::PlayerbotAI* ai = PlayerbotAIStorage::Instance().GetAI(bot);
     if (!ai)
     {
-        sLog.outString("TortoiseBots: random teleport no AI for bot %s, retaining position", bot->GetName());
+        TB_LOG_DETAIL("TortoiseBots: random teleport no AI for bot %s, retaining position", bot->GetName());
         return false;
     }
     ai::WorldPosition const* chosen = PickLevelFittingPoint(bot);
@@ -178,12 +213,50 @@ bool TryRandomTeleport(::Player* bot, BotRecord const& record)
 
     bool ok = bot->TeleportTo(chosen->getMapId(), chosen->getX(), chosen->getY(), chosen->getZ(), bot->GetOrientation(), 0);
     if (ok)
-        sLog.outString("TortoiseBots: random teleport bot %s level %u to map %u %.1f %.1f %.1f", bot->GetName(), bot->GetLevel(), chosen->getMapId(), chosen->getX(), chosen->getY(), chosen->getZ());
+        TB_LOG_DETAIL("TortoiseBots: random teleport bot %s level %u to map %u %.1f %.1f %.1f", bot->GetName(), bot->GetLevel(), chosen->getMapId(), chosen->getX(), chosen->getY(), chosen->getZ());
     else
         sLog.outError("TortoiseBots: random teleport TeleportTo failed for bot %s to map %u %.1f %.1f %.1f, retaining position", bot->GetName(), chosen->getMapId(), chosen->getX(), chosen->getY(), chosen->getZ());
     return ok;
 }
 } // namespace
+
+bool BotManager::RelocateRandomBot(::Player* bot, RandomBotDestination destination)
+{
+    if (!bot || !IsControllableBot(bot) || !bot->IsAlive() || bot->GetLevel() < 10 ||
+        bot->IsBeingTeleported() || bot->IsInCombat() || bot->IsTaxiFlying() ||
+        bot->InBattleGround() || bot->InBattleGroundQueue() || bot->GetGroup() ||
+        !bot->GetMap() || bot->GetMap()->IsDungeon() || sRandomBotFacade.IsPinnedBot(bot->GetGUIDLow()) ||
+        !BotActivityLeaseManager::Instance().IsAvailableForBackground(bot->GetGUIDLow())) return false;
+    auto const* record = FindBot(bot->GetObjectGuid());
+    auto* ai = PlayerbotAIStorage::Instance().GetAI(bot);
+    if (!record || !record->random || !record->masterGuid.IsEmpty() || !ai || ai->HasActivePlayerMaster()) return false;
+    bool const rpg = destination == RandomBotDestination::Rpg;
+    auto const* point = PickLevelFittingPoint(bot, rpg ? ai::TravelDestinationPurpose::GenericRpg :
+        ai::TravelDestinationPurpose::Grind, destination == RandomBotDestination::LocalGrind ?
+            float(std::max<uint32>(1, sPlayerbotAIConfig.randomBotTeleportDistance)) : 0,
+        rpg, true);
+    if (!point) return false;
+    auto const* area = point->GetArea();
+    if (!area) return false;
+    // The native teleport owns movement teardown, packets and map transfer.
+    // Change the home bind only after an accepted friendly inn relocation.
+    if (!bot->TeleportTo(point->getMapId(), point->getX(), point->getY(), point->getZ(), bot->GetOrientation(), 0)) return false;
+    if (rpg) bot->SetHomebindToLocation(*point, area->Id);
+    ai->Reset(true);
+    if (rpg)
+    {
+        // Reset clears the old trip. Restore the mature inn dwell period only
+        // after native teleport acceptance, so the next decision stays here.
+        auto* target = ai->GetAiObjectContext()->GetValue<ai::TravelTarget*>("travel target")->Get();
+        if (target)
+        {
+            MaNGOS::Singleton<ai::TravelMgr>::Instance().SetNullTravelTarget(target);
+            target->SetStatus(ai::TravelStatus::TRAVEL_STATUS_COOLDOWN);
+            target->SetExpireIn(10 * MINUTE * IN_MILLISECONDS);
+        }
+    }
+    return true;
+}
 
 bool BotManager::RelocateHopelessBot(::Player* bot)
 {
@@ -217,6 +290,23 @@ bool BotManager::RelocateHopelessBot(::Player* bot)
         return false;
     if (areaLevel <= (int32)bot->GetLevel() + 5)
         return false;
+    // A bot below level 10 belongs in its starting area: its quests are there, and any
+    // capital the picker would choose lies behind zones it cannot cross alive (a level-6
+    // dwarf sent to Stormwind walks the Burning Steppes to reach Coldridge Valley - or,
+    // from Darnassus, cannot reach it at all and dies or spins on the spot). Home bind.
+    if (bot->GetLevel() < 10)
+    {
+        if (!bot->TeleportToHomebind(0, false))
+        {
+            sLog.outError("TortoiseBots: hopeless-death relocation to home bind failed for bot %s, retaining position", bot->GetName());
+            return false;
+        }
+        if (deathCountValue)
+            deathCountValue->Reset();
+        sLog.outString("TortoiseBots: relocated hopeless bot %s level %u after %u deaths from area level %d to its home bind",
+            bot->GetName(), bot->GetLevel(), deathCount, areaLevel);
+        return true;
+    }
     ai::WorldPosition const* chosen = PickLevelFittingPoint(bot);
     if (!chosen)
         return false;
@@ -227,7 +317,7 @@ bool BotManager::RelocateHopelessBot(::Player* bot)
     }
     if (deathCountValue)
         deathCountValue->Reset();
-    sLog.outString("TortoiseBots: relocated hopeless bot %s level %u after %u deaths from area level %d to map %u %.1f %.1f %.1f",
+    TB_LOG_DETAIL("TortoiseBots: relocated hopeless bot %s level %u after %u deaths from area level %d to map %u %.1f %.1f %.1f",
         bot->GetName(), bot->GetLevel(), deathCount, areaLevel, chosen->getMapId(), chosen->getX(), chosen->getY(), chosen->getZ());
     return true;
 }
@@ -273,6 +363,17 @@ BotManager& BotManager::Instance()
 {
     static BotManager instance;
     return instance;
+}
+
+static bool HasPrimaryProfession(::Player* player)
+{
+    static uint16 const kPrimary[] = {SKILL_ALCHEMY, SKILL_BLACKSMITHING,
+        SKILL_ENCHANTING, SKILL_ENGINEERING, SKILL_HERBALISM,
+        SKILL_LEATHERWORKING, SKILL_MINING, SKILL_SKINNING, SKILL_TAILORING};
+    for (uint16 skill : kPrimary)
+        if (player->HasSkill(skill))
+            return true;
+    return false;
 }
 
 void BotManager::OnPlayerLogin(::Player* player)
@@ -336,6 +437,28 @@ void BotManager::OnPlayerLogin(::Player* player)
     record.enteredWorld = true;
     record.lifecycle = BotLifecycle::InWorld;
 
+    // Normalize Goblin and High Elf bot starting zone: relocate from player-only
+    // custom starting zones (Blackstone Island 5536 and Thalassian Highlands 5225,
+    // which lack navmesh/transport paths to mainland) to standard faction starting zones.
+    if (record.random && player->GetLevel() < 10)
+    {
+        uint32 zoneId = player->GetZoneId();
+        if (player->GetRace() == RACE_GOBLIN && zoneId == 5536)
+        {
+            player->TeleportTo(1, -618.518f, -4251.67f, 38.718f, 0.0f);
+            player->SetHomebindToLocation(WorldLocation(1, -618.518f, -4251.67f, 38.718f, 0.0f), 14);
+            player->SaveToDB();
+            TB_LOG_DETAIL("TortoiseBots: normalized Goblin bot %s spawn to Valley of Trials", player->GetName());
+        }
+        else if (player->GetRace() == RACE_HIGH_ELF && zoneId == 5225)
+        {
+            player->TeleportTo(0, -8949.95f, -132.493f, 83.5312f, 0.0f);
+            player->SetHomebindToLocation(WorldLocation(0, -8949.95f, -132.493f, 83.5312f, 0.0f), 12);
+            player->SaveToDB();
+            TB_LOG_DETAIL("TortoiseBots: normalized High Elf bot %s spawn to Northshire", player->GetName());
+        }
+    }
+
     // One-shot random scatter on headless login only; fail-closed, no DB mutation, no homebind
     TryRandomTeleport(player, record);
 
@@ -354,17 +477,39 @@ void BotManager::OnPlayerLogin(::Player* player)
         player->GetTotalPlayedTime(), sRandomBotFacade.GetValue(botGuidLow, "seeded"));
     if (record.random && sPlayerbotAIConfig.randomGearUpgradeEnabled && player->GetLevel() >= 5 && freshBot)
     {
-        sRandomBotFacade.UpdateGearSpells(player);
-        sRandomBotFacade.SetValue(botGuidLow, "seeded", 1);
+        if (sRandomBotFacade.UpdateGearSpells(player))
+            sRandomBotFacade.SetValue(botGuidLow, "seeded", 1);
     }
 
-    sLog.outString("TortoiseBots: bot %s entered world through native PlayerScript", player->GetName());
+    // Persistent-level random bots previously skipped Randomize entirely,
+    // leaving weapon skill at 1 and no professions. Existing professions are
+    // the durable guard: never reroll a bot that has already learned one.
+    if (record.random && !HasPrimaryProfession(player))
+    {
+        PlayerbotFactory skills(player, player->GetLevel());
+        skills.InitAllSkills();
+        sLog.outString("TortoiseBots: bot %s received level-bound skills and professions", player->GetName());
+    }
+
+    if (m_packetTestEnabled && player->GetObjectGuid() == m_packetTestMasterGuid &&
+        !player->HasUnitState(UNIT_STAT_STUNNED))
+    {
+        player->AddUnitState(UNIT_STAT_STUNNED);
+        m_packetTestInjectedStun = true;
+    }
+    TB_LOG_DETAIL("TortoiseBots: bot %s entered world through native PlayerScript", player->GetName());
 }
 
 void BotManager::OnPlayerBeforeLogout(::Player* player)
 {
     if (!player)
         return;
+    if (m_packetTestInjectedStun && player->GetObjectGuid() == m_packetTestMasterGuid)
+    {
+        player->ClearUnitState(UNIT_STAT_STUNNED);
+        m_packetTestInjectedStun = false;
+    }
+
 
     ::WorldSession* session = player->GetSession();
     if (!session || !session->IsHeadless())
@@ -413,7 +558,7 @@ void BotManager::DetachOwnedBots(::Player* master)
             sLog.outError("TortoiseBots: cannot detach master for %s because the module AI adapter is unavailable",
                 bot->GetName());
 
-        sLog.outDebug("TortoiseBots: detached live master pointer %s from bot %s; ownership GUID retained",
+        TB_LOG_DEBUG("TortoiseBots: detached live master pointer %s from bot %s; ownership GUID retained",
             master->GetName(), bot->GetName());
     }
 }
@@ -442,7 +587,7 @@ void BotManager::RebindOwnedBots(::Player* master)
                 bot->GetName());
         BotActivityLeaseManager::Instance().ClaimForMaster(entry.record.characterGuid.GetCounter());
 
-        sLog.outString("TortoiseBots: rebound master %s to existing Headless bot %s; mature movement preserved",
+        TB_LOG_DETAIL("TortoiseBots: rebound master %s to existing Headless bot %s; mature movement preserved",
             master->GetName(), bot->GetName());
     }
 }
@@ -459,7 +604,7 @@ void BotManager::ReleaseToClient(::Player* player)
     if (it->second.aiAdapter)
         it->second.aiAdapter->Shutdown();
 
-    sLog.outString("TortoiseBots: releasing module control of %s to a network client", player->GetName());
+    TB_LOG_DETAIL("TortoiseBots: releasing module control of %s to a network client", player->GetName());
     uint32_t guidLow = player->GetObjectGuid().GetCounter();
     m_bots.erase(it);
     // Human reclaim owns the character now: evict any background lease with
@@ -486,7 +631,7 @@ bool BotManager::RunPendingAddRemoveTest(uint32_t accountId, ::ObjectGuid guid)
     bool noRecord = !FindBot(guid);
 
     bool passed = queued && removed && noSession && noPlayer && noRecord;
-    sLog.outString("TortoiseBots: PendingAddRemoveTest %s acct %u queued %u session %u player %u record %u",
+    TB_LOG_BASIC("TortoiseBots: PendingAddRemoveTest %s acct %u queued %u session %u player %u record %u",
         passed ? "PASSED" : "FAILED", accountId, queued, !noSession, !noPlayer, !noRecord);
     return passed;
 }
@@ -496,8 +641,21 @@ bool BotManager::AddBot(uint32_t accountId, ::ObjectGuid guid, ::ObjectGuid mast
     return AddBotWithMaster(accountId, guid, masterGuid);
 }
 
+bool BotManager::HasRandomAdmissionCapacity()
+{
+    uint32 const limit = sPlayerbotAIConfig.randomBotLoginDbQueueLimit;
+    return !limit || (CharacterDatabase.GetPendingAsyncOperationCount() < limit &&
+        CharacterDatabase.GetPendingResultCount() < limit &&
+        LoginDatabase.GetPendingAsyncOperationCount() < limit &&
+        LoginDatabase.GetPendingResultCount() < limit);
+}
+
 bool BotManager::AddRandomBot(uint32_t accountId, ::ObjectGuid guid)
 {
+    // Background admission yields to pending SQL/callback work. Explicit human
+    // AddBotWithMaster requests keep their existing interactive path.
+    if (!HasRandomAdmissionCapacity())
+        return false;
     bool ok = AddBotWithMaster(accountId, guid, ::ObjectGuid());
     if (ok)
         if (BotRecord* record = FindBot(guid))
@@ -511,7 +669,7 @@ bool BotManager::AddBotWithMaster(uint32_t accountId, ::ObjectGuid guid, ::Objec
     auto it = m_bots.find(key);
     if (it != m_bots.end())
     {
-        sLog.outString("TortoiseBots: AddBot guid %s already tracked (state %u enteredWorld %u)",
+        TB_LOG_DETAIL("TortoiseBots: AddBot guid %s already tracked (state %u enteredWorld %u)",
             guid.GetString().c_str(), static_cast<uint32_t>(it->second.record.lifecycle), it->second.record.enteredWorld);
         return false;
     }
@@ -529,6 +687,7 @@ bool BotManager::AddBotWithMaster(uint32_t accountId, ::ObjectGuid guid, ::Objec
         return false;
 
     BotEntry entry;
+    entry.record.generation = ++m_recordGeneration;
     entry.record.accountId = accountId;
     entry.record.characterGuid = guid;
     entry.record.masterGuid = masterGuid;
@@ -536,7 +695,7 @@ bool BotManager::AddBotWithMaster(uint32_t accountId, ::ObjectGuid guid, ::Objec
     m_bots.emplace(key, std::move(entry));
     if (!masterGuid.IsEmpty())
         BotActivityLeaseManager::Instance().ClaimForMaster(key);
-    sLog.outString("TortoiseBots: AddBot %s on acct %u master %s (PendingAdd, StartHeadlessSession)",
+    TB_LOG_DETAIL("TortoiseBots: AddBot %s on acct %u master %s (PendingAdd, StartHeadlessSession)",
         guid.GetString().c_str(), accountId, masterGuid.GetString().c_str());
     return true;
 }
@@ -625,6 +784,18 @@ std::vector<OwnedCharacter> BotManager::GetOwnedCharacters(uint32_t ownerAccount
     return result;
 }
 
+void BotManager::DrainPendingBotRemovals()
+{
+    if (m_inBotUpdate || BotWorldActions::IsMapExecution())
+        return;
+    for (auto const& pending : m_pendingBotRemovals.Take())
+    {
+        auto found = m_bots.find(pending.guid);
+        if (found != m_bots.end() && found->second.record.generation == pending.generation)
+            RemoveBot(found->second.record.characterGuid, pending.save);
+    }
+}
+
 bool BotManager::RemoveBot(::ObjectGuid guid, bool save)
 {
     uint32_t key = guid.GetCounter();
@@ -633,6 +804,10 @@ bool BotManager::RemoveBot(::ObjectGuid guid, bool save)
         return false;
 
     BotRecord& rec = it->second.record;
+    // Map execution may request removal, but never changes the world-owned
+    // registry/leases or stops a session while any joined AI stack is live.
+    if (BotWorldActions::IsMapExecution())
+        return m_pendingBotRemovals.Push(key, rec.generation, save);
     // Reentrant removal from inside an AI update (UpdateBots sets
     // m_inBotUpdate): stopping the session now would run the logout hooks
     // synchronously, delete the updating PlayerbotAI out from under its own
@@ -642,21 +817,8 @@ bool BotManager::RemoveBot(::ObjectGuid guid, bool save)
     {
         rec.lifecycle = BotLifecycle::Removing;
         BotActivityLeaseManager::Instance().Release(key, BotActivity::Grinding);
-        bool queued = false;
-        for (auto const& pending : m_pendingBotRemovals)
-            if (pending.characterGuid.GetCounter() == key)
-            {
-                queued = true;
-                break;
-            }
-        if (!queued)
-        {
-            PendingBotRemoval pending;
-            pending.characterGuid = guid;
-            pending.save = save;
-            m_pendingBotRemovals.push_back(pending);
-        }
-        sLog.outString("TortoiseBots: RemoveBot %s deferred until AI update completes (Removing)",
+        m_pendingBotRemovals.Push(key, rec.generation, save);
+        TB_LOG_DETAIL("TortoiseBots: RemoveBot %s deferred until AI update completes (Removing)",
             guid.GetString().c_str());
         return true;
     }
@@ -679,14 +841,14 @@ bool BotManager::RemoveBot(::ObjectGuid guid, bool save)
         {
             ::WorldSession* s = p->GetSession();
             if (s && s->HasNetworkTransport())
-                sLog.outString("TortoiseBots: RemoveBot %s reclaimed by network — releasing", guid.GetString().c_str());
+                TB_LOG_DETAIL("TortoiseBots: RemoveBot %s reclaimed by network — releasing", guid.GetString().c_str());
         }
         m_bots.erase(it);
-        sLog.outString("TortoiseBots: RemoveBot %s immediate NotFound — erased", guid.GetString().c_str());
+        TB_LOG_DETAIL("TortoiseBots: RemoveBot %s immediate NotFound — erased", guid.GetString().c_str());
         return true;
     }
 
-    sLog.outString("TortoiseBots: RemoveBot %s (Removing; erasure deferred until NotFound)", guid.GetString().c_str());
+    TB_LOG_DETAIL("TortoiseBots: RemoveBot %s (Removing; erasure deferred until NotFound)", guid.GetString().c_str());
     return true;
 }
 
@@ -891,7 +1053,7 @@ bool BotManager::SetBotFollow(::ObjectGuid botGuid, ::ObjectGuid masterGuid)
         return false;
     }
 
-    sLog.outString("TortoiseBots: SetBotFollow bot %s -> master %s",
+    TB_LOG_DETAIL("TortoiseBots: SetBotFollow bot %s -> master %s",
         botGuid.GetString().c_str(), masterGuid.GetString().c_str());
     return true;
 }
@@ -904,7 +1066,7 @@ void BotManager::SetAutoTestEnabled(bool enable, uint32_t accountId, ::ObjectGui
     m_autoTestTicks = 0;
     m_autoState = AutoState::Idle;
     m_autoTestPassed = false;
-    sLog.outString("TortoiseBots: AutoTest %s acct %u guid %s",
+    TB_LOG_BASIC("TortoiseBots: AutoTest %s acct %u guid %s",
         enable ? "enabled" : "disabled", accountId, guid.GetString().c_str());
 }
 
@@ -917,13 +1079,15 @@ void BotManager::SetPacketBridgeTestEnabled(bool enable, uint32_t accountId,
     m_packetTestBotGuid = botGuid;
     m_packetTestTicks = 0;
     m_packetTestStage = 0;
-    sLog.outString("TortoiseBots: PacketBridgeTest %s acct %u master %s bot %s",
+    TB_LOG_BASIC("TortoiseBots: PacketBridgeTest %s acct %u master %s bot %s",
         enable ? "enabled" : "disabled", accountId,
         masterGuid.GetString().c_str(), botGuid.GetString().c_str());
 }
 
 void BotManager::UpdateBots(uint32_t diff)
 {
+    DrainPendingBotRemovals();
+
     // Guard: AI updates below can request (their own or another bot's) removal.
     // RemoveBot defers the session stop while this is set; the queue drains
     // after the loop, when no PlayerbotAI Update remains on the stack.
@@ -978,19 +1142,26 @@ void BotManager::UpdateBots(uint32_t diff)
 
         if (entry.aiAdapter && entry.aiAdapter->IsUsable())
         {
-            entry.aiAdapter->Update(diff);
+            // Consume the mature logout intent outside PlayerbotAI's stack.
+            // The guard queues native session teardown until this pass joins.
+            PlayerbotAI* ai = entry.aiAdapter->GetAI();
+            if (ai && ai->GetShouldLogOut())
+            {
+                ai->SetShouldLogOut(false);
+                RemoveBot(entry.record.characterGuid, true);
+                continue;
+            }
+            // Individual AI runs only through the native map hook. World
+            // maintenance retains teleport acknowledgements and logout intent.
         }
     }
 
+    BotWorldActions::Instance().Drain();
+    NativeGuildTrades::Update();
+
     m_inBotUpdate = false;
 
-    if (!m_pendingBotRemovals.empty())
-    {
-        std::vector<PendingBotRemoval> pending;
-        pending.swap(m_pendingBotRemovals);
-        for (auto const& removal : pending)
-            RemoveBot(removal.characterGuid, removal.save);
-    }
+    DrainPendingBotRemovals();
 }
 
 void BotManager::OnWorldUpdate(uint32_t diff)
@@ -1009,7 +1180,7 @@ void BotManager::OnWorldUpdate(uint32_t diff)
             // Ensure Stop was requested; if player was reclaimed by Network, core owns transfer.
             if (p && p->GetSession() && p->GetSession()->HasNetworkTransport())
             {
-                sLog.outString("TortoiseBots: Bot %s reclaimed by network during removal — releasing",
+                TB_LOG_DETAIL("TortoiseBots: Bot %s reclaimed by network during removal — releasing",
                     rec.characterGuid.GetString().c_str());
                 uint32_t guidLow = rec.characterGuid.GetCounter();
                 it = m_bots.erase(it);
@@ -1019,7 +1190,7 @@ void BotManager::OnWorldUpdate(uint32_t diff)
             }
             if (state == HeadlessSessionState::NotFound)
             {
-                sLog.outString("TortoiseBots: Bot %s removal complete (NotFound)", rec.characterGuid.GetString().c_str());
+                TB_LOG_DETAIL("TortoiseBots: Bot %s removal complete (NotFound)", rec.characterGuid.GetString().c_str());
                 uint32_t guidLow = rec.characterGuid.GetCounter();
                 it = m_bots.erase(it);
                 BotActivityLeaseManager::Instance().ClaimForMaster(guidLow);
@@ -1037,7 +1208,7 @@ void BotManager::OnWorldUpdate(uint32_t diff)
             ::WorldSession* playerSess = p->GetSession();
             if (playerSess && playerSess->HasNetworkTransport())
             {
-                sLog.outString("TortoiseBots: Bot %s reclaimed by network session acct %u — releasing",
+                TB_LOG_DETAIL("TortoiseBots: Bot %s reclaimed by network session acct %u — releasing",
                     rec.characterGuid.GetString().c_str(), playerSess->GetAccountId());
                 uint32_t guidLow = rec.characterGuid.GetCounter();
                 it = m_bots.erase(it);
@@ -1098,7 +1269,7 @@ void BotManager::OnWorldUpdate(uint32_t diff)
 
         if (state == HeadlessSessionState::NotFound)
         {
-            sLog.outString("TortoiseBots: Bot %s session ended (NotFound) — releasing",
+            TB_LOG_DETAIL("TortoiseBots: Bot %s session ended (NotFound) — releasing",
                 rec.characterGuid.GetString().c_str());
             uint32_t guidLow = rec.characterGuid.GetCounter();
             it = m_bots.erase(it);
@@ -1109,10 +1280,8 @@ void BotManager::OnWorldUpdate(uint32_t diff)
         ++it;
     }
 
-    // Mature PlayerbotAI still exposes a donor-shaped population view for
-    // perception/social queries. Refresh it from the authoritative native
-    // records immediately before any AI update; it never owns sessions.
-    PlayerbotAI::ProcessDelayedPackets();
+    // Refresh the non-random/controlled population view from native sessions
+    // and records immediately before social/activity queries; it owns no sessions.
     sRandomBotFacade.SyncNativePlayers();
     UpdateBots(diff);
 
@@ -1155,10 +1324,55 @@ void BotManager::UpdatePacketBridgeTest(uint32_t diff)
 
     Player* master = sObjectAccessor.FindPlayer(m_packetTestMasterGuid);
     Player* bot = sObjectAccessor.FindPlayer(m_packetTestBotGuid);
+    auto cleanGiftFixture = [&]
+    {
+        bool clean = true;
+        if (master && bot && master->GetTrader() == bot) master->TradeCancel(true);
+        if (m_packetTestGiftCreated)
+        {
+            clean = master && bot && master->GetItemCount(117, true) + bot->GetItemCount(117, true) <= 10;
+            if (clean)
+            {
+                master->DestroyItemCount(117, 10, true, false, true);
+                bot->DestroyItemCount(117, 10, true, false, true);
+                master->SaveInventoryAndGoldToDB();
+                bot->SaveInventoryAndGoldToDB();
+                m_packetTestGiftCreated = false;
+            }
+        }
+        if (m_packetTestGuildId)
+        {
+            Guild* guild = sGuildMgr.GetGuildById(m_packetTestGuildId);
+            if (guild && guild->GetName() == "TBPLAYNativeGift")
+                guild->Disband();
+            else if (guild)
+                clean = false;
+            m_packetTestGuildId = 0;
+        }
+        if (m_packetTestGroupId)
+        {
+            Group* group = master ? master->GetGroup() : (bot ? bot->GetGroup() : nullptr);
+            if (group && group->GetId() == m_packetTestGroupId && group->GetMembersCount() == 2 &&
+                group->IsMember(m_packetTestMasterGuid) && group->IsMember(m_packetTestBotGuid))
+                group->Disband();
+            else if (group)
+                clean = false;
+            m_packetTestGroupId = 0;
+        }
+        return clean && (!master || !master->GetGuildId()) && (!bot || !bot->GetGuildId());
+    };
+
     if (m_packetTestStage == 1)
     {
         if (master && bot && master->IsInWorld() && bot->IsInWorld())
         {
+            bool retainedStun = master->HasUnitState(UNIT_STAT_STUNNED) && !master->GetSession()->isLogingOut();
+            sLog.outString("TortoiseBots: PacketBridgeTest stun retention %s", retainedStun ? "PASSED" : "FAILED");
+            if (m_packetTestInjectedStun)
+            {
+                master->ClearUnitState(UNIT_STAT_STUNNED);
+                m_packetTestInjectedStun = false;
+            }
             // Recreate the GM-invisible state a GM account would restore on a
             // Headless character, then require the bot-login normalization to
             // remove every GM-facing flag before command processing continues.
@@ -1194,7 +1408,7 @@ void BotManager::UpdatePacketBridgeTest(uint32_t diff)
                 PlayerbotAIStorage::Instance().GetAI(bot) &&
                 PlayerbotAIStorage::Instance().GetAI(bot)->HasStrategy("follow", BotState::BOT_STATE_NON_COMBAT);
 
-            sLog.outString("TortoiseBots: PacketBridgeTest native command surface %s — list/stats/follow dispatched through ChatHandler",
+            TB_LOG_BASIC("TortoiseBots: PacketBridgeTest native command surface %s — list/stats/follow dispatched through ChatHandler",
                 commandSurfacePassed ? "PASSED" : "FAILED");
 
             bool immediateInvitePassed =
@@ -1214,7 +1428,17 @@ void BotManager::UpdatePacketBridgeTest(uint32_t diff)
                 return;
             }
 
-            sLog.outString("TortoiseBots: PacketBridgeTest immediate native invite PASSED");
+            TB_LOG_BASIC("TortoiseBots: PacketBridgeTest immediate native invite PASSED");
+            PlayerbotAI* botAI = PlayerbotAIStorage::Instance().GetAI(bot);
+            ai::Event worldEvent("native world-owner test", std::string(), master);
+            bool queued = BotWorldActions::Instance().Enqueue(bot, "stay chat shortcut", worldEvent);
+            if (queued != true || !botAI || botAI->HasStrategy("stay", BotState::BOT_STATE_NON_COMBAT))
+            {
+                sLog.outError("TortoiseBots: PacketBridgeTest world action admission FAILED");
+                m_packetTestStage = 3;
+                m_packetTestTicks = 0;
+                return;
+            }
             m_packetTestStage = 2;
             m_packetTestTicks = 0;
         }
@@ -1232,8 +1456,42 @@ void BotManager::UpdatePacketBridgeTest(uint32_t diff)
         if (master && bot && master->GetGroup() && bot->GetGroup() == master->GetGroup() &&
             master->GetGroup()->IsMember(bot->GetObjectGuid()))
         {
-            sLog.outString("TortoiseBots: PacketBridgeTest group invite/accept PASSED — mature PlayerbotAI joined group");
+            TB_LOG_BASIC("TortoiseBots: PacketBridgeTest group invite/accept PASSED — mature PlayerbotAI joined group");
+            PlayerbotAI* botAI = PlayerbotAIStorage::Instance().GetAI(bot);
+            bool queuedActionPassed = botAI && botAI->HasStrategy("stay", BotState::BOT_STATE_NON_COMBAT);
+            sLog.outString("TortoiseBots: PacketBridgeTest queued world action %s",
+                queuedActionPassed ? "PASSED" : "FAILED");
 
+
+            ai::Event leaveEvent("native continuation test", std::string(), bot);
+            ai::ActionResult admission = ai::ACTION_RESULT_FAILED;
+            {
+                BotWorldActions::MapScope simulatedMapOwner;
+                if (botAI && botAI->GetCurrentEngine())
+                    admission = botAI->GetCurrentEngine()->ExecuteAction("leave", leaveEvent);
+            }
+            bool deferred = admission == ai::ACTION_RESULT_DEFERRED && bot->GetGroup() == master->GetGroup();
+            sLog.outString("TortoiseBots: PacketBridgeTest deferred action admission %s",
+                deferred ? "PASSED" : "FAILED");
+            m_packetTestStage = 5;
+            m_packetTestTicks = 0;
+
+        }
+        else if (m_packetTestTicks > 300)
+        {
+            sLog.outError("TortoiseBots: PacketBridgeTest group invite/accept FAILED");
+            m_packetTestStage = 3;
+            m_packetTestTicks = 0;
+        }
+        return;
+    }
+
+    if (m_packetTestStage == 5)
+    {
+        if (master && bot && (!bot->GetGroup() || m_packetTestTicks > 100))
+        {
+            sLog.outString("TortoiseBots: PacketBridgeTest deferred action completion %s",
+                !bot->GetGroup() ? "PASSED" : "FAILED");
             // Exercise the native uninvite handler for cleanup. Incoming packet
             // delivery is intentionally not injected here: the strict runtime
             // proof must come from a real Network session through Penqle's
@@ -1253,25 +1511,158 @@ void BotManager::UpdatePacketBridgeTest(uint32_t diff)
             syntheticNetwork->SetPlayer(nullptr);
             delete syntheticNetwork;
 
-            Map* botMap = bot->GetMap();
-            if (!botMap)
+            // Default-off, disposable low-level fixture only. Exercise the same
+            // native self-damage path as the core die command, never hardcore.
+            // Restore the temporary random eligibility by record incarnation.
+            bool revivalPassed = false;
+            BotRecord* fixture = FindBot(m_packetTestBotGuid);
+            if (fixture && bot->IsAlive() && bot->IsInWorld() &&
+                !bot->IsHardcore() && bot->GetLevel() < 5 && !bot->InBattleGround() &&
+                !bot->IsBeingTeleported() && IsControllableBot(bot))
             {
-                sLog.outError("TortoiseBots: PacketBridgeTest missing bot map before stranded-session check");
-                m_packetTestStage = 3;
-                m_packetTestTicks = 0;
-                return;
+                struct RestoreRandomEligibility
+                {
+                    BotManager& manager;
+                    ObjectGuid guid;
+                    uint64_t generation;
+                    bool random;
+                    ~RestoreRandomEligibility()
+                    {
+                        if (BotRecord* current = manager.FindBot(guid))
+                            if (current->generation == generation)
+                                current->random = random;
+                    }
+                } restore{*this, m_packetTestBotGuid, fixture->generation, fixture->random};
+                fixture->random = true;
+                bot->DealDamage(bot, bot->GetHealth(), nullptr, DIRECT_DAMAGE,
+                    SPELL_SCHOOL_MASK_NORMAL, nullptr, false);
+                bool const died = !bot->IsAlive();
+                revivalPassed = died && sRandomBotFacade.Revive(bot) && bot->IsAlive() &&
+                    bot->IsInWorld() && !bot->IsBeingTeleported();
             }
-            botMap->Remove(bot, false);
-            sLog.outString("TortoiseBots: PacketBridgeTest forced an out-of-world Headless bot");
-            m_packetTestStage = 4;
+            sLog.outString("TortoiseBots: PacketBridgeTest native admin revival %s",
+                revivalPassed ? "PASSED" : "FAILED");
+
+            PlayerbotAI* masterAI = PlayerbotAIStorage::Instance().GetAI(master);
+            PlayerbotAI* botAI = PlayerbotAIStorage::Instance().GetAI(bot);
+            if (masterAI) masterAI->DoSpecificAction("stay chat shortcut", ai::Event(), true);
+            if (botAI) botAI->DoSpecificAction("stay chat shortcut", ai::Event(), true);
+            // The persisted fixture may be a ghost from earlier population
+            // tests. Native trade correctly refuses dead actors; prepare both
+            // in their data-defined starting area rather than a saved danger zone.
+            if (!master->IsAlive() && !master->IsHardcore())
+            {
+                master->ResurrectPlayer(1.0f);
+                if (master->IsAlive()) master->SpawnCorpseBones();
+            }
+            PlayerInfo const* start = sObjectMgr.GetPlayerInfo(master->GetRace(), master->GetClass());
+            bool const moved = master->IsAlive() && start &&
+                master->TeleportTo(start->mapId, start->positionX, start->positionY, start->positionZ, start->orientation) &&
+                bot->TeleportTo(start->mapId, start->positionX + 1, start->positionY, start->positionZ, start->orientation);
+            m_packetTestStage = moved ? 6 : 3;
             m_packetTestTicks = 0;
         }
-        else if (m_packetTestTicks > 300)
+        else if (m_packetTestTicks > 100)
         {
-            sLog.outError("TortoiseBots: PacketBridgeTest group invite/accept FAILED");
+            sLog.outError("TortoiseBots: PacketBridgeTest deferred action completion FAILED — fixture lost");
             m_packetTestStage = 3;
             m_packetTestTicks = 0;
         }
+        return;
+    }
+
+    if (m_packetTestStage >= 6 && m_packetTestStage <= 9)
+    {
+        auto failGift = [&](char const* reason)
+        {
+            sLog.outError("TortoiseBots: PacketBridgeTest native guild trade FAILED at stage %u: %s", m_packetTestStage, reason);
+            cleanGiftFixture();
+            m_packetTestStage = 3;
+            m_packetTestTicks = 0;
+        };
+        if (!master || !bot || m_packetTestTicks > 200 || !PlayerbotAIStorage::Instance().GetAI(master) ||
+            !PlayerbotAIStorage::Instance().GetAI(bot)) { failGift("actor lifetime or timeout"); return; }
+        if (!PlayerbotAI::IsSafe(master, bot) || master->GetDistance3dToCenter(bot) > TRADE_DISTANCE)
+            return;
+        if (m_packetTestStage == 6)
+        {
+            if (master->GetGuildId() || bot->GetGuildId() || sGuildMgr.GetGuildByName("TBPLAYNativeGift") ||
+                master->GetItemCount(117, true) || bot->GetItemCount(117, true)) { failGift("fixture already owns guild or item"); return; }
+            Guild* guild = new Guild;
+            if (!guild->Create(master, "TBPLAYNativeGift")) { delete guild; failGift("native guild creation"); return; }
+            sGuildMgr.AddGuild(guild);
+            m_packetTestGuildId = guild->GetId();
+            if (guild->AddMember(bot->GetObjectGuid(), guild->GetLowestRank()) != GuildAddStatus::OK) { failGift("native guild membership"); return; }
+            m_packetTestGiftCreated = true;
+            if (!master->StoreNewItemInBestSlots(117, 10)) { failGift("native item storage"); return; }
+            Item* gift = nullptr;
+            for (Item* item : PlayerbotAIStorage::Instance().GetAI(master)->GetInventoryItems())
+                if (item->GetEntry() == 117 && item->GetCount() == 10) { gift = item; break; }
+            char const* refusal = "missing ten-item stack";
+            if (!gift || !NativeGuildTrades::Offer(master, bot, gift, 4, &refusal)) { failGift(refusal ? refusal : "partial offer admission"); return; }
+            m_packetTestStage = 7;
+            m_packetTestTicks = 0;
+            return;
+        }
+        if (master->GetTradeData() || bot->GetTradeData()) return;
+        if (m_packetTestStage == 7)
+        {
+            bool const conserved = master->GetItemCount(117, true) == 6 && bot->GetItemCount(117, true) == 4;
+            sLog.outString("TortoiseBots: PacketBridgeTest native guild partial trade %s", conserved ? "PASSED" : "FAILED");
+            if (!conserved) { failGift("partial item conservation"); return; }
+            Item* gift = nullptr;
+            for (Item* item : PlayerbotAIStorage::Instance().GetAI(master)->GetInventoryItems())
+                if (item->GetEntry() == 117 && item->GetCount() == 6) { gift = item; break; }
+            if (!gift || !NativeGuildTrades::Offer(master, bot, gift, 6)) { failGift("whole offer admission"); return; }
+            m_packetTestStage = 8;
+            m_packetTestTicks = 0;
+            return;
+        }
+        if (m_packetTestStage == 8)
+        {
+            bool const conserved = !master->GetItemCount(117, true) && bot->GetItemCount(117, true) == 10;
+            sLog.outString("TortoiseBots: PacketBridgeTest native guild whole trade %s", conserved ? "PASSED" : "FAILED");
+            if (!conserved) { failGift("whole item conservation"); return; }
+            bool const clean = cleanGiftFixture();
+            sLog.outString("TortoiseBots: PacketBridgeTest native guild cleanup %s", clean ? "PASSED" : "FAILED");
+            if (!clean) { failGift("fixture cleanup"); return; }
+            if (master->GetGroup() || bot->GetGroup()) { failGift("pre-existing party"); return; }
+            WorldPacket invite(CMSG_GROUP_INVITE); invite << bot->GetName();
+            master->GetSession()->HandleGroupInviteOpcode(invite);
+            WorldPacket accept(CMSG_GROUP_ACCEPT);
+            bot->GetSession()->HandleGroupAcceptOpcode(accept);
+            Group* group = master->GetGroup();
+            if (!group || group != bot->GetGroup() || group->GetMembersCount() != 2) { failGift("native party creation"); return; }
+            m_packetTestGroupId = group->GetId();
+            m_packetTestGiftCreated = true;
+            if (!master->StoreNewItemInBestSlots(117, 3)) { failGift("party item storage"); return; }
+            Item* gift = nullptr;
+            for (Item* item : PlayerbotAIStorage::Instance().GetAI(master)->GetInventoryItems())
+                if (item->GetEntry() == 117 && item->GetCount() == 3) { gift = item; break; }
+            if (!gift || !NativeGuildTrades::OfferParty(master, bot, gift, 3)) { failGift("native party offer"); return; }
+            m_packetTestStage = 9;
+            m_packetTestTicks = 0;
+            return;
+        }
+        bool const conserved = !master->GetGuildId() && !bot->GetGuildId() &&
+            !master->GetItemCount(117, true) && bot->GetItemCount(117, true) == 3;
+        sLog.outString("TortoiseBots: PacketBridgeTest native party trade %s", conserved ? "PASSED" : "FAILED");
+        if (!conserved) { failGift("party item conservation"); return; }
+        bool const clean = cleanGiftFixture() && !master->GetGroup() && !bot->GetGroup();
+        sLog.outString("TortoiseBots: PacketBridgeTest native party cleanup %s", clean ? "PASSED" : "FAILED");
+        if (!clean) { failGift("party cleanup"); return; }
+        Map* botMap = bot->GetMap();
+        if (!botMap)
+        {
+            sLog.outError("TortoiseBots: PacketBridgeTest missing bot map before stranded-session check");
+            m_packetTestStage = 3;
+            m_packetTestTicks = 0;
+            return;
+        }
+        botMap->Remove(bot, false);
+        sLog.outString("TortoiseBots: PacketBridgeTest forced an out-of-world Headless bot");
+        m_packetTestStage = 4;
+        m_packetTestTicks = 0;
         return;
     }
 
@@ -1282,7 +1673,7 @@ void BotManager::UpdatePacketBridgeTest(uint32_t diff)
         bool materialized = sObjectAccessor.FindPlayerNotInWorld(m_packetTestBotGuid) != nullptr;
         if (released && !materialized)
         {
-            sLog.outString("TortoiseBots: PacketBridgeTest stranded Headless recovery PASSED");
+            TB_LOG_BASIC("TortoiseBots: PacketBridgeTest stranded Headless recovery PASSED");
             m_packetTestStage = 3;
             m_packetTestTicks = 0;
         }
@@ -1297,6 +1688,7 @@ void BotManager::UpdatePacketBridgeTest(uint32_t diff)
 
     if (m_packetTestStage == 3)
     {
+        if (m_packetTestGuildId || m_packetTestGroupId || m_packetTestGiftCreated) cleanGiftFixture();
         if (FindBot(m_packetTestBotGuid))
             RemoveBot(m_packetTestBotGuid, true);
         if (FindBot(m_packetTestMasterGuid))
@@ -1306,7 +1698,7 @@ void BotManager::UpdatePacketBridgeTest(uint32_t diff)
             BotSessionAdapter::GetHeadlessSessionState(m_packetTestBotGuid) == HeadlessSessionState::NotFound &&
             BotSessionAdapter::GetHeadlessSessionState(m_packetTestMasterGuid) == HeadlessSessionState::NotFound)
         {
-            sLog.outString("TortoiseBots: PacketBridgeTest cleanup PASSED");
+            TB_LOG_BASIC("TortoiseBots: PacketBridgeTest cleanup PASSED");
             m_packetTestEnabled = false;
         }
         else if (m_packetTestTicks > 300)
@@ -1336,7 +1728,7 @@ void BotManager::UpdateAutoTest(uint32_t diff)
         case AutoState::Idle:
             if (m_autoTestTicks > 20)
             {
-                sLog.outString("TortoiseBots: AutoTest step 1 — login bot %s", m_autoTestGuid.GetString().c_str());
+                TB_LOG_BASIC("TortoiseBots: AutoTest step 1 — login bot %s", m_autoTestGuid.GetString().c_str());
                 if (AddBot(m_autoTestAccount, m_autoTestGuid))
                 {
                     m_autoState = AutoState::LoggingIn;
@@ -1354,7 +1746,7 @@ void BotManager::UpdateAutoTest(uint32_t diff)
             {
                 if (rec->enteredWorld)
                 {
-                    sLog.outString("TortoiseBots: AutoTest step 2 — bot entered world, tick %u", rec->ticksInWorld);
+                    TB_LOG_BASIC("TortoiseBots: AutoTest step 2 — bot entered world, tick %u", rec->ticksInWorld);
                     m_autoState = AutoState::InWorld;
                     m_autoTestTicks = 0;
                 }
@@ -1367,9 +1759,9 @@ void BotManager::UpdateAutoTest(uint32_t diff)
                         std::string sessInfo = (st != HeadlessSessionState::NotFound) ? "headless" : "<null>";
                         bool loading = (st == HeadlessSessionState::Loading || st == HeadlessSessionState::Pending);
                         std::string playerInfo = p ? (p->IsInWorld() ? "IsInWorld" : "not InWorld") : "FindPlayer null";
-                        sLog.outString("TortoiseBots: AutoTest LoggingIn tick %u sess %s state %u acct %u loading %u player %s pending %u", m_autoTestTicks, sessInfo.c_str(), static_cast<uint32>(st), rec->accountId, loading, playerInfo.c_str(), st == HeadlessSessionState::Pending);
+                        TB_LOG_DEBUG("TortoiseBots: AutoTest LoggingIn tick %u sess %s state %u acct %u loading %u player %s pending %u", m_autoTestTicks, sessInfo.c_str(), static_cast<uint32>(st), rec->accountId, loading, playerInfo.c_str(), st == HeadlessSessionState::Pending);
                         if (st != HeadlessSessionState::NotFound && p && p->GetSession())
-                            sLog.outString("TortoiseBots:   sess details network %u headless %u", p->GetSession()->HasNetworkTransport(), p->GetSession()->IsHeadless());
+                            TB_LOG_DEBUG("TortoiseBots:   sess details network %u headless %u", p->GetSession()->HasNetworkTransport(), p->GetSession()->IsHeadless());
                     }
                     if (m_autoTestTicks > 400)
                     {
@@ -1396,7 +1788,7 @@ void BotManager::UpdateAutoTest(uint32_t diff)
                     if (p)
                     {
                         p->SaveToDB(false, false);
-                        sLog.outString("TortoiseBots: AutoTest step 3 — saved bot %s", p->GetName());
+                        TB_LOG_BASIC("TortoiseBots: AutoTest step 3 — saved bot %s", p->GetName());
                     }
                     else
                     {
@@ -1418,7 +1810,7 @@ void BotManager::UpdateAutoTest(uint32_t diff)
         case AutoState::Saving:
             if (m_autoTestTicks > 20)
             {
-                sLog.outString("TortoiseBots: AutoTest step 4 — logout bot");
+                TB_LOG_BASIC("TortoiseBots: AutoTest step 4 — logout bot");
                 if (RemoveBot(m_autoTestGuid, true))
                 {
                     m_autoState = AutoState::LoggingOut;
@@ -1438,7 +1830,7 @@ void BotManager::UpdateAutoTest(uint32_t diff)
                     !FindBot(m_autoTestGuid) &&
                     BotSessionAdapter::GetHeadlessSessionState(m_autoTestGuid) == HeadlessSessionState::NotFound)
                 {
-                    sLog.outString("TortoiseBots: AutoTest step 5 — re-login bot");
+                    TB_LOG_BASIC("TortoiseBots: AutoTest step 5 — re-login bot");
                     if (AddBot(m_autoTestAccount, m_autoTestGuid))
                     {
                         m_autoState = AutoState::Relogging;
@@ -1462,7 +1854,7 @@ void BotManager::UpdateAutoTest(uint32_t diff)
             {
                 if (rec->enteredWorld)
                 {
-                    sLog.outString("TortoiseBots: AutoTest step 6 — bot re-entered world, lifecycle PASSED; cleaning up");
+                    TB_LOG_BASIC("TortoiseBots: AutoTest step 6 — bot re-entered world, lifecycle PASSED; cleaning up");
                     FinishAutoTest(true);
                 }
                 else if (m_autoTestTicks > 400)
@@ -1474,7 +1866,7 @@ void BotManager::UpdateAutoTest(uint32_t diff)
                 {
                     ::Player* p = sObjectAccessor.FindPlayer(m_autoTestGuid);
                     HeadlessSessionState st = BotSessionAdapter::GetHeadlessSessionState(rec->characterGuid);
-                    sLog.outString("TortoiseBots: AutoTest Relogging tick %u state %u pending %u player %s", m_autoTestTicks, static_cast<uint32>(st), st == HeadlessSessionState::Pending, p ? (p->IsInWorld() ? "IsInWorld" : "notInWorld") : "null");
+                    TB_LOG_DEBUG("TortoiseBots: AutoTest Relogging tick %u state %u pending %u player %s", m_autoTestTicks, static_cast<uint32>(st), st == HeadlessSessionState::Pending, p ? (p->IsInWorld() ? "IsInWorld" : "notInWorld") : "null");
                 }
             }
             else if (m_autoTestTicks > 400)
@@ -1488,7 +1880,7 @@ void BotManager::UpdateAutoTest(uint32_t diff)
                 !sObjectAccessor.FindPlayer(m_autoTestGuid) &&
                 BotSessionAdapter::GetHeadlessSessionState(m_autoTestGuid) == HeadlessSessionState::NotFound)
             {
-                sLog.outString("TortoiseBots: AutoTest cleanup %s; diagnostic disabled",
+                TB_LOG_BASIC("TortoiseBots: AutoTest cleanup %s; diagnostic disabled",
                     m_autoTestPassed ? "PASSED" : "FAILED");
                 m_autoTestEnabled = false;
                 m_autoState = AutoState::Done;

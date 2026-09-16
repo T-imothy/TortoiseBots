@@ -40,6 +40,10 @@ namespace ai
     public:
         PetIsDeadValue(PlayerbotAI* ai, std::string name = "pet dead") : BoolCalculatedValue(ai, name) {}
         virtual bool Calculate() override;
+    private:
+        bool petDbCached = false;
+        bool hasStoredPet = false;
+        uint32 lastPetDbCheckMs = 0;
     };
 
     class PetIsHappyValue : public BoolCalculatedValue

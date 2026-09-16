@@ -1,3 +1,5 @@
+#include "runtime/BotWorldActions.h"
+#include "playerbot/BotDiagnostics.h"
 #include "MovementActions.h"
 
 #include "playerbot/playerbot.h"
@@ -37,6 +39,7 @@ void RpgHelper::AfterExecute(bool doDelay, bool waitForGroup, std::string nextAc
         nextAction = "rpg cancel";
 
     SET_AI_VALUE(std::string, "next rpg action", nextAction);
+    ai::botdiag::TraceBehavior(ai, "rpg_next", nextAction.c_str());
 
     if(doDelay)
         setDelay(waitForGroup);
@@ -142,6 +145,7 @@ bool RpgEmoteAction::Execute(Event& event)
 
 bool RpgCancelAction::Execute(Event& event)
 {
+    ai::botdiag::TraceBehavior(ai, "rpg_cancel", event.getSource().c_str());
     rpg->OnCancel();
 
     if (!urand(0,3) || AI_VALUE(GuidPosition, "rpg target").GetEntry() != AI_VALUE(TravelTarget*, "travel target")->GetEntry() || AI_VALUE(TravelTarget*, "travel target")->GetStatus() != TravelStatus::TRAVEL_STATUS_WORK) //1 out of 4 to ignore current travel target after cancel.
@@ -693,6 +697,9 @@ bool RpgTradeUsefulAction::IsTradingItem(uint32 entry)
 
 bool RpgTradeUsefulAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
+
     rpg->BeforeExecute();
 
     GuidPosition guidP = AI_VALUE(GuidPosition, "rpg target");
@@ -760,6 +767,9 @@ bool RpgTradeUsefulAction::Execute(Event& event)
 
 bool RpgEnchantAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
+
     rpg->BeforeExecute();
 
     GuidPosition guidP = AI_VALUE(GuidPosition, "rpg target");
@@ -808,14 +818,16 @@ bool RpgEnchantAction::Execute(Event& event)
         if (!player->GetTradeData() || !player->GetTradeData()->HasItem(item->getObjectGuid()))
         {
             ai->TellDebug(ai->GetMaster(), "starting trade", "debug rpg");
-            PlayerbotAIStorage::Instance().GetAI(player)->DoSpecificAction("trade", Event("rpg action", param.str().c_str()), true);
+            PlayerbotAI* partnerAI = PlayerbotAIStorage::Instance().GetAI(player);
+            if (!partnerAI || !partnerAI->DoSpecificAction("trade", Event("rpg action", param.str().c_str()), true))
+                return false;
         }
 
         bool isTrading = bot->GetTradeData();
 
         if (isTrading)
         {
-            if (player->GetTradeData()->HasItem(item->getObjectGuid())) //Did we manage to add the item to the trade?
+            if (player->GetTradeData() && player->GetTradeData()->HasItem(item->getObjectGuid())) //Did we manage to add the item to the trade?
             {
                 uint32 duration;
                 Unit* target = nullptr;

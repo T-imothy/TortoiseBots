@@ -2,14 +2,18 @@
 
 #include <cstdint>
 #include <vector>
+#include <deque>
 #include <set>
 #include <string>
+#include "BotActivityController.h"
 
 // pi-lens-ignore: clang:pp_file_not_found
 #include "ObjectGuid.h"
 
 namespace TortoiseBots
 {
+
+enum class RandomBotAdminAction { Refresh, Upgrade, Revive, ChangeStrategy, Remove, Initialize, Teleport, Rpg, Grind };
 
 class RandomBotService
 {
@@ -25,6 +29,15 @@ public:
     void Update(uint32_t diff);
     void Shutdown();
 
+    // Native admin requests are applied by this world-owned service, in
+    // bounded slices. Queued work retains GUIDs, never live Player pointers.
+    uint32_t QueueAdminAction(RandomBotAdminAction action, std::string selector);
+    void RequestUpdate();
+    bool ResetPersistentState();
+    bool ConfigureActivityController(double p, double i, double d) { return m_activity.Configure(p, i, d); }
+    float GetActivityPercentage() const { return static_cast<float>(m_activity.Percentage()); }
+    uint32_t GetTargetCount() const { return m_desiredTargetCount; }
+    size_t GetPendingAdminCount() const { return m_adminRequests.size(); }
     void OnHumanLogin();
     void OnHumanLogout();
 
@@ -38,11 +51,18 @@ private:
     RandomBotService() = default;
     ~RandomBotService() = default;
 
+    struct AdminRequest { ObjectGuid guid; RandomBotAdminAction action; uint64_t generation; };
+    std::deque<AdminRequest> m_adminRequests;
+    std::set<std::pair<uint32_t, RandomBotAdminAction>> m_adminKeys;
+    void ProcessAdminActions();
+    bool PrepareAccountReset();
+    void ProgressAccountReset();
     void LoadCandidates();
     void MaintainOnlinePool();
     void UpdateMaintenance(uint32_t elapsed);
     void RemoveExpiredBots(uint32_t diff);
-    uint32_t TargetCount() const;
+    void RefreshPopulationTarget();
+    void RemoveSurplusBots(uint32_t online);
     uint32_t DesiredTargetCount() const;
     bool TryAutoCreate();
     enum class AutoCreateCharResult { Success, TransientName, TransientError, Permanent };
@@ -57,17 +77,26 @@ private:
     std::vector<uint32_t> m_ageMs;
     std::vector<uint32_t> m_strategyAgeMs;
     std::vector<uint32_t> m_randomizeAgeMs;
+    // Prevent repeated expensive randomization in this process if the
+    // persistent value write is delayed or unavailable.
+    std::set<uint32_t> m_initializedThisRun;
     size_t m_nextCandidate = 0;
     size_t m_nextMaintenance = 0;
+    size_t m_nextRemoval = 0;
     uint32_t m_serviceElapsedMs = 0;
-    // Stable target: snapshot of DesiredTargetCount once at Initialize when
-    // auto-create is enabled (no per-cadence re-roll/ratchet toward Max). For
-    // non-auto, snapshot of TargetCount (capped). Handles bounds and deficit
-    // via size check in TryAutoCreate.
+    BotActivityController m_activity;
+    // Desired target survives restart; available candidates cap admission only.
     uint32_t m_targetCount = 0;
+    uint32_t m_desiredTargetCount = 0;
+    bool m_targetReady = false;
     uint32_t m_humanSessions = 0;
     bool m_initialized = false;
     bool m_started = false;
+    bool m_resetPending = false;
+    bool m_resetFailed = false;
+    size_t m_nextResetAccount = 0;
+    uint32_t m_resetCharacterAccount = 0;
+    std::vector<uint32_t> m_resetAccountIds;
     std::set<uint32> m_pinnedGuids;
     bool m_pinnedResolved = false;
     // Idempotent creation: known RNDBOT account ids (from LoadCandidates and

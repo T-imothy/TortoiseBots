@@ -2,12 +2,12 @@
 
 #include "../runtime/BotManager.h"
 #include "../runtime/PlayerbotAIStorage.h"
-#include "playerbot/PlayerbotAI.h"
 
 #include "Player.h"
 #include "WorldPacket.h"
 #include "WorldSession.h"
 #include "Log.h"
+#include "ModuleLog.h"
 
 namespace TortoiseBots
 {
@@ -27,9 +27,9 @@ bool BotPacketAdapter::CanPacketSend(WorldSession* session, WorldPacket const& p
     if (session->IsHeadless())
     {
         if (packet.getOpcode() == SMSG_GROUP_INVITE)
-            sLog.outDebug("TortoiseBots: ServerScript CanPacketSend bot outgoing SMSG_GROUP_INVITE from %s", session->GetPlayer() ? session->GetPlayer()->GetName() : "<none>");
-        if (PlayerbotAI* ai = PlayerbotAIStorage::Instance().GetAI(session->GetPlayer()))
-            ai->HandleBotOutgoingPacket(packet);
+            TB_LOG_DEBUG("TortoiseBots: ServerScript CanPacketSend bot outgoing SMSG_GROUP_INVITE from %s", session->GetPlayer() ? session->GetPlayer()->GetName() : "<none>");
+        PlayerbotAIStorage::Instance().QueuePacket(session->GetPlayer(), packet,
+            PlayerbotAIStorage::PacketDirection::BotOutgoing);
         return true;
     }
 
@@ -40,10 +40,10 @@ bool BotPacketAdapter::CanPacketSend(WorldSession* session, WorldPacket const& p
     for (Player* bot : BotManager::Instance().GetBotsForMaster(master->GetObjectGuid()))
     {
         if (packet.getOpcode() == SMSG_PARTY_COMMAND_RESULT)
-            sLog.outDebug("TortoiseBots: ServerScript CanPacketSend master SMSG_PARTY_COMMAND_RESULT %s -> bot %s",
+            TB_LOG_DEBUG("TortoiseBots: ServerScript CanPacketSend master SMSG_PARTY_COMMAND_RESULT %s -> bot %s",
                 master->GetName(), bot ? bot->GetName() : "<none>");
-        if (PlayerbotAI* ai = PlayerbotAIStorage::Instance().GetAI(bot))
-            ai->HandleMasterOutgoingPacket(packet);
+        PlayerbotAIStorage::Instance().QueuePacket(bot, packet,
+            PlayerbotAIStorage::PacketDirection::MasterOutgoing);
     }
 
     return true;
@@ -72,13 +72,13 @@ void BotPacketAdapter::DispatchMasterIncoming(WorldSession* session, WorldPacket
         packet.getOpcode() == CMSG_GOSSIP_HELLO ||
         packet.getOpcode() == CMSG_LOOT_ROLL)
     {
-        sLog.outString("TortoiseBots: ServerScript CanPacketReceive master opcode %u from %s", packet.getOpcode(), master->GetName());
+        TB_LOG_DEBUG("TortoiseBots: ServerScript CanPacketReceive master opcode %u from %s", packet.getOpcode(), master->GetName());
     }
 
     for (Player* bot : BotManager::Instance().GetBotsForMaster(master->GetObjectGuid()))
     {
-        if (PlayerbotAI* ai = PlayerbotAIStorage::Instance().GetAI(bot))
-            ai->HandleMasterIncomingPacket(packet);
+        PlayerbotAIStorage::Instance().QueuePacket(bot, packet,
+            PlayerbotAIStorage::PacketDirection::MasterIncoming);
     }
 }
 

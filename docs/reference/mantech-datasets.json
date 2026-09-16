@@ -1,0 +1,46 @@
+{
+  "source": "T-imothy/tortoise-wow preserved Vanilla datasets",
+  "sources": {
+    "ai_playerbot_weightscales.sql": {
+      "sha256": "1f0f0e5b22053a8c07a63139269f43c0a7dec0ad0ebca11e367c2c866edc7e80",
+      "commit": "8415f1b9dc079f7207cfaf8589fa135ce19a1ada"
+    },
+    "ai_playerbot_enchants.sql": {
+      "sha256": "768a8384a7fda894e5ef9c8d189cb17c7b95dec355f714efd5ee08088999a68f",
+      "commit": "8415f1b9dc079f7207cfaf8589fa135ce19a1ada"
+    },
+    "ai_playerbot_zone_level.sql": {
+      "sha256": "1ad2e2ca6ba93eac789322646a006e31ec40cc161852b697296725196800c82b",
+      "commit": "8415f1b9dc079f7207cfaf8589fa135ce19a1ada"
+    },
+    "ai_playerbot_named_location.sql": {
+      "sha256": "0c9c677b2e3075451b036f665d8497f364bf371368762c03deb7f31af5304a8d",
+      "commit": "8415f1b9dc079f7207cfaf8589fa135ce19a1ada"
+    }
+  },
+  "originalRows": {
+    "ai_playerbot_weightscales": 32,
+    "ai_playerbot_weightscale_data": 220,
+    "ai_playerbot_enchants": 320,
+    "ai_playerbot_zone_level": 3488,
+    "ai_playerbot_named_location": 54055
+  },
+  "seedRows": {
+    "ai_playerbot_weightscales": 28,
+    "ai_playerbot_weightscale_data": 180,
+    "ai_playerbot_enchants": 319,
+    "ai_playerbot_zone_level": 1000,
+    "ai_playerbot_named_location": 54055
+  },
+  "filters": [
+    "nine Vanilla classes only",
+    "enchant spell IDs exist in local Turtle Spell.dbc, legal slots/spec class",
+    "zone IDs exist in AreaTable.dbc and levels 1..60",
+    "named locations have local Map.dbc IDs and finite in-bounds coordinates"
+  ],
+  "limitations": [
+    "Named-location coordinates retain donor data; terrain/path validation still belongs to native consumers.",
+    "No donor travel-node/path cache is imported over Turtle geometry."
+  ],
+  "sqlSha256": "f7b44ea0abea9bf9acbdee1c7fb4d05289dca315e2857dd49be435b3000fc420"
+}

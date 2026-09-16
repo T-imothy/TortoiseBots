@@ -35,7 +35,7 @@ Unit* GrindTargetValue::FindTargetForGrinding(int assistCount)
     Group* group = bot->GetGroup();
     Player* master = GetMaster();
 
-    if (master && (master == bot || master->GetMapId() != bot->GetMapId() || master->IsBeingTeleported() || !PlayerbotAIStorage::Instance().GetAI(master)))
+    if (master && (master == bot || !ai->IsSafe(master) || !PlayerbotAIStorage::Instance().GetAI(master)))
         master = nullptr;
 
     // TEMP-DEBUG(grind-target): the existing "debug grind" strategy only reaches a
@@ -102,7 +102,7 @@ Unit* GrindTargetValue::FindTargetForGrinding(int assistCount)
         for (Group::member_citerator itr = groupSlot.begin(); itr != groupSlot.end(); itr++)
         {
             Player* member = sObjectMgr.GetPlayer(itr->guid);
-            if (member && sServerFacade.IsAlive(member))
+            if (member && ai->IsSafe(member) && sServerFacade.IsAlive(member))
                 groupMembers.push_back({ member, member->getPositionX(), member->getPositionY() });
         }
     }
@@ -227,7 +227,7 @@ Unit* GrindTargetValue::FindTargetForGrinding(int assistCount)
             for (Group::member_citerator itr = groupSlot.begin(); itr != groupSlot.end(); itr++)
             {
                 Player* member = sObjectMgr.GetPlayer(itr->guid);
-                if (!member || !sServerFacade.IsAlive(member))
+                if (!member || !ai->IsSafe(member) || !sServerFacade.IsAlive(member))
                     continue;
 
                 newdistance = sServerFacade.getDistance2d(member, unit);
@@ -278,7 +278,7 @@ int GrindTargetValue::GetTargetingPlayerCount( Unit* unit )
     for (Group::member_citerator itr = groupSlot.begin(); itr != groupSlot.end(); itr++)
     {
         Player *member = sObjectMgr.GetPlayer(itr->guid);
-        if( !member || !sServerFacade.IsAlive(member) || member == bot)
+        if( !member || member == bot || !this->ai->IsSafe(member) || !sServerFacade.IsAlive(member))
             continue;
 
         PlayerbotAI* ai = PlayerbotAIStorage::Instance().GetAI(member);

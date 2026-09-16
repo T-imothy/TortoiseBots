@@ -146,6 +146,9 @@ public:
     uint32 minRandomBotChangeStrategyTime, maxRandomBotChangeStrategyTime;
     uint32 minRandomBotReviveTime, maxRandomBotReviveTime;
     uint32 randomBotsMaxLoginsPerInterval;
+    uint32 randomBotsMaxCreatesPerInterval = 10;
+    uint32 randomBotCreationBudgetMs = 5;
+    uint32 randomBotLoginDbQueueLimit = 256;
     uint32 minRandomBotsPriceChangeInterval, maxRandomBotsPriceChangeInterval;
     //Auction house settings
     bool shouldQueryAHListingsOutsideOfAH;
@@ -216,6 +219,9 @@ public:
     // candidate pool so the normal Headless login path handles them; no raw
     // INSERT, no DB worker, no blocking loop.
     bool randomBotAutoCreate = false;
+    // One-start reset of generated random-bot accounts. Keep disabled except
+    // for an intentional cohort rebuild; the service verifies the suffix.
+    bool deleteRandomBotAccounts = false;
     // Scatter random bots on headless login to a validated level-appropriate
     // GenericRpg destination. Default off; fail-closed when no validated level
     // or no destination. Persisted ai_playerbot_zone_level is tried first
@@ -240,6 +246,9 @@ public:
     std::string combatStrategies, nonCombatStrategies, reactStrategies, deadStrategies;
     std::string randomBotCombatStrategies, randomBotNonCombatStrategies, randomBotReactStrategies, randomBotDeadStrategies;
     uint32 randomBotMaxLevel;
+    uint32 randomBotMinLevel = 1;
+    float randomBotMaxLevelChance = 0.15f;
+    uint32 randomBotTeleportDistance = 1000;
     float randomChangeMultiplier;
     uint32 classRaceProbabilityTotal;
     uint32 classRaceProbability[MAX_CLASSES][MAX_RACES];
@@ -298,6 +307,9 @@ public:
     // log files (logs/bots/<name>_acc<id>_<timestamp>.log) are emitted. Default
     // off so production servers don't pay disk I/O / branch overhead.
     bool enableActionLog;
+    bool behaviorTrace = false;
+    uint32 behaviorTraceMap = 0;
+    float behaviorTraceX = -800.0f, behaviorTraceY = -530.0f, behaviorTraceRadius = 200.0f;
     // Filename (relative to LogsDir) for the bot subsystem log. When set,
     // all sLog calls from bot .cpp files are redirected there instead of
     // writing to the main server log. Default: "bots.log". Empty = disabled.

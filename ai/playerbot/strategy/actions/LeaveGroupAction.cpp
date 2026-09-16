@@ -7,7 +7,7 @@ namespace ai
 {
 	bool LeaveGroupAction::Leave(Player* player)
     {
-        if (!player)
+        if (!player || !bot->GetSession())
             return false;
 
         Group* group = bot->GetGroup();
@@ -32,6 +32,8 @@ namespace ai
             std::string member = bot->GetName();
             p << uint32(PARTY_OP_LEAVE) << member << uint32(0);
             bot->GetSession()->HandleGroupDisbandOpcode(p);
+            if (group && bot->GetGroup() == group)
+                return false;
             if (ai->HasRealPlayerMaster() && ai->GetMaster()->getObjectGuid() != player->getObjectGuid())
                 ai->TellPlayer(player, "I left my group");
         }

@@ -21,6 +21,24 @@ std::vector<ChatCommand> BotChatAdapter::GetCommands() const
     {
         return BotCommands::HandleAuctionCommand(handler, args);
     };
-    return {bot, auction};
+    ChatCommand performance{};
+    performance.Name = "perfmon";
+    performance.SecurityLevel = SEC_MODERATOR;
+    performance.AllowConsole = true;
+    performance.ModuleHandler = [](ChatHandler* handler, char* args)
+    {
+        return BotCommands::HandlePerformanceCommand(handler, args);
+    };
+    ChatCommand random{};
+    random.Name = "rndbot";
+    random.SecurityLevel = SEC_ADMINISTRATOR;
+    random.AllowConsole = true;
+    random.ModuleHandler = [](ChatHandler* handler, char* args)
+    {
+        return BotCommands::HandleRandomCommand(handler, args);
+    };
+    return {bot, auction, performance, random};
 }
 }
+
+// End native module command registrations.

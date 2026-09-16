@@ -160,6 +160,7 @@ std::list<GuidPosition> RangeFilterValue::Calculate()
           }
        }
 
+       if (!from_player) return result;
        for (auto guid : guidList)
        {
           if (guid.sqDistance(from_player) <= range * range)

@@ -1,5 +1,6 @@
 #pragma once
 #include "Strategy.h"
+#include <mutex>
 
 namespace ai
 {
@@ -23,6 +24,7 @@ namespace ai
         // Nothing in the tree ever writes to this, so the branch that reads it
         // is never taken. Left in place because it is public and something
         // outside may yet fill it; the real caching happens below.
+        static std::recursive_mutex cacheMutex;
         static std::map<std::string, std::string> actionLinesCache;
 
         // Drops the remembered lines for a qualifier after somebody edits them.

@@ -57,5 +57,6 @@ namespace ai
 
     private:
         uint32 aiReactionUpdateDelay;
+        bool worldReactionFound = false;
     };
 }

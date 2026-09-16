@@ -1,8 +1,10 @@
+#include "runtime/NativeGuildTrades.h"
 #include "BotHostAdapter.h"
 
 #include "../behavior/PlayerConvenience.h"
 #include "../runtime/BotActivityLease.h"
 #include "../runtime/BotManager.h"
+#include "../runtime/BotWorldActions.h"
 #include "../runtime/RandomBotService.h"
 #include "../runtime/AhMarketService.h"
 #include "../ahbot/AhBot.h"
@@ -13,6 +15,7 @@
 #include "ObjectMgr.h"
 #include "Log.h"
 #include "Database/DatabaseEnv.h"
+#include "ModuleLog.h"
 
 #include <cctype>
 #include <string>
@@ -63,13 +66,27 @@ bool IsDisposableFixture(uint32 accountId, uint32 guidLow, char const* testName)
 }
 
 BotHostAdapter::BotHostAdapter()
-    : WorldScript("tortoisebots_world", { WORLDHOOK_ON_STARTUP, WORLDHOOK_ON_UPDATE, WORLDHOOK_ON_SHUTDOWN })
+    : WorldScript("tortoisebots_world", { WORLDHOOK_ON_STARTUP, WORLDHOOK_ON_UPDATE, WORLDHOOK_ON_SHUTDOWN,
+        WORLDHOOK_ON_AFTER_CONFIG_LOAD })
 {
+}
+
+void BotHostAdapter::OnAfterConfigLoad(bool /*reload*/)
+{
+    ModuleLog::Instance().ApplyConfig();
 }
 
 void BotHostAdapter::OnStartup()
 {
+    // World::LoadConfigSettings() runs before module scripts are constructed,
+    // so the startup pass of OnAfterConfigLoad never reaches this script. Read
+    // the level here; the hook then covers `.reload config`.
+    ModuleLog::Instance().ApplyConfig();
+
     bool configured = sPlayerbotAIConfig.Initialize();
+    m_active = configured;
+    if (!m_active)
+        return;
     RandomBotService::Instance().Initialize();
     BattlegroundQueueService::Instance().Initialize();
     if (configured && sPlayerbotAIConfig.ahMarketUseCMaNGOS)
@@ -109,11 +126,13 @@ void BotHostAdapter::OnStartup()
             sLog.outError("TortoiseBots: PacketBridgeTest requires two distinct disposable TBPLAY fixtures on one account");
     }
 
-    sLog.outString("TortoiseBots: native module loaded (AI %s)", configured ? "enabled" : "disabled");
+    TB_LOG_BASIC("TortoiseBots: native module loaded (AI %s)", configured ? "enabled" : "disabled");
     ObservabilityEmitter::Instance().Initialize();
 }
 void BotHostAdapter::OnUpdate(uint32 diff)
 {
+    if (!m_active)
+        return;
     ++m_ticks;
     // Expire stale leases before services select candidates (issue #89).
     BotActivityLeaseManager::Instance().Update(diff);
@@ -132,11 +151,16 @@ void BotHostAdapter::OnUpdate(uint32 diff)
 
 void BotHostAdapter::OnShutdown()
 {
+    if (!m_active)
+        return;
+    m_active = false;
+    NativeGuildTrades::Clear();
+    BotWorldActions::Instance().Clear();
     ObservabilityEmitter::Instance().Shutdown();
     BattlegroundQueueService::Instance().Shutdown();
     RandomBotService::Instance().Shutdown();
     BotActivityLeaseManager::Instance().Clear();
-    sLog.outString("TortoiseBots: native module shutting down after %u world ticks", m_ticks);
+    TB_LOG_BASIC("TortoiseBots: native module shutting down after %u world ticks", m_ticks);
 }
 
 } // namespace TortoiseBots

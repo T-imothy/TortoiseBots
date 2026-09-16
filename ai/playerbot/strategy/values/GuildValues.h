@@ -2,6 +2,7 @@
 #include "playerbot/PlayerbotAI.h"
 #include "playerbot/strategy/AiObjectContext.h"
 #include "playerbot/strategy/Value.h"
+#include "playerbot/strategy/WorldCalculatedValue.h"
 
 namespace ai
 {
@@ -44,10 +45,17 @@ namespace ai
         }
     };
 
-    class GuildOrderValue : public CalculatedValue<GuildOrder>
+    class GuildMotdValue : public WorldCalculatedValue<std::string>
     {
     public:
-        GuildOrderValue(PlayerbotAI* ai) : CalculatedValue<GuildOrder>(ai, "guild order", 60) {}
+        GuildMotdValue(PlayerbotAI* ai) : WorldCalculatedValue<std::string>(ai, "guild motd", 2) {}
+        std::string Calculate() override;
+    };
+
+    class GuildOrderValue : public WorldCalculatedValue<GuildOrder>
+    {
+    public:
+        GuildOrderValue(PlayerbotAI* ai) : WorldCalculatedValue<GuildOrder>(ai, "guild order", 60) {}
 
         GuildOrder Calculate() override;
 
@@ -146,6 +154,13 @@ namespace ai
         }
     };
 
+    class GuildMissingReagentsValue : public WorldCalculatedValue<std::vector<uint32>>
+    {
+    public:
+        GuildMissingReagentsValue(PlayerbotAI* ai) : WorldCalculatedValue<std::vector<uint32>>(ai, "guild missing reagents", 10) {}
+        std::vector<uint32> Calculate() override;
+    };
+
     class NeedsProfessionReagentsValue : public BoolCalculatedValue
     {
     public:
@@ -181,10 +196,10 @@ namespace ai
 
     std::vector<std::pair<uint32, int8>> FindRepeatableQuestsRewardingItem(uint32 itemId);
 
-    class GuildShareListValue : public CalculatedValue<std::vector<GuildShareItemEntry>>
+    class GuildShareListValue : public WorldCalculatedValue<std::vector<GuildShareItemEntry>>
     {
     public:
-        GuildShareListValue(PlayerbotAI* ai) : CalculatedValue<std::vector<GuildShareItemEntry>>(ai, "guild share list", 30) {}
+        GuildShareListValue(PlayerbotAI* ai) : WorldCalculatedValue<std::vector<GuildShareItemEntry>>(ai, "guild share list", 30) {}
 
         std::vector<GuildShareItemEntry> Calculate() override;
 
@@ -195,17 +210,17 @@ namespace ai
     // Represents an item a nearby guild member needs, paired with the receiver.
     struct GuildShareTarget
     {
-        Player* receiver = nullptr;
+        ObjectGuid receiverGuid;
         uint32 itemId = 0;
         uint32 amount = 0;
 
-        bool IsValid() const { return receiver && itemId; }
+        bool IsValid() const { return !receiverGuid.IsEmpty() && itemId; }
     };
 
-    class GuildShareTargetValue : public CalculatedValue<GuildShareTarget>
+    class GuildShareTargetValue : public WorldCalculatedValue<GuildShareTarget>
     {
     public:
-        GuildShareTargetValue(PlayerbotAI* ai) : CalculatedValue<GuildShareTarget>(ai, "guild share target", 5) {}
+        GuildShareTargetValue(PlayerbotAI* ai) : WorldCalculatedValue<GuildShareTarget>(ai, "guild share target", 5) {}
 
         GuildShareTarget Calculate() override;
     };
@@ -219,26 +234,26 @@ namespace ai
         bool Calculate() override { return AI_VALUE(GuildShareTarget, "guild share target").IsValid(); }
     };
 
-    class GuildShareCraftOrderValue : public CalculatedValue<GuildOrder>
+    class GuildShareCraftOrderValue : public WorldCalculatedValue<GuildOrder>
     {
     public:
-        GuildShareCraftOrderValue(PlayerbotAI* ai) : CalculatedValue<GuildOrder>(ai, "guild share craft order", 60) {}
+        GuildShareCraftOrderValue(PlayerbotAI* ai) : WorldCalculatedValue<GuildOrder>(ai, "guild share craft order", 60) {}
 
         GuildOrder Calculate() override;
     };
 
-    class GuildShareFarmOrderValue : public CalculatedValue<GuildOrder>
+    class GuildShareFarmOrderValue : public WorldCalculatedValue<GuildOrder>
     {
     public:
-        GuildShareFarmOrderValue(PlayerbotAI* ai) : CalculatedValue<GuildOrder>(ai, "guild share farm order", 60) {}
+        GuildShareFarmOrderValue(PlayerbotAI* ai) : WorldCalculatedValue<GuildOrder>(ai, "guild share farm order", 60) {}
 
         GuildOrder Calculate() override;
     };
 
-    class GuildShareQuestRewardOrderValue : public CalculatedValue<GuildOrder>
+    class GuildShareQuestRewardOrderValue : public WorldCalculatedValue<GuildOrder>
     {
     public:
-        GuildShareQuestRewardOrderValue(PlayerbotAI* ai) : CalculatedValue<GuildOrder>(ai, "guild share quest reward order", 60) {}
+        GuildShareQuestRewardOrderValue(PlayerbotAI* ai) : WorldCalculatedValue<GuildOrder>(ai, "guild share quest reward order", 60) {}
 
         GuildOrder Calculate() override;
     };

@@ -73,6 +73,7 @@ if(TORTOISE_MODULE_CMAKE_PHASE STREQUAL "DISCOVERY")
 
   set(TORTOISEBOTS_HOST_SRC
     "${TORTOISEBOTS_ROOT}/host/Module.cpp"
+    "${TORTOISEBOTS_ROOT}/host/ModuleLog.cpp"
     "${TORTOISEBOTS_ROOT}/host/BotHostAdapter.cpp"
     "${TORTOISEBOTS_ROOT}/host/BotCombatTelemetry.cpp"
     "${TORTOISEBOTS_ROOT}/host/BotSessionAdapter.cpp"
@@ -81,6 +82,8 @@ if(TORTOISE_MODULE_CMAKE_PHASE STREQUAL "DISCOVERY")
     "${TORTOISEBOTS_ROOT}/host/BotPlayerAdapter.cpp"
     "${TORTOISEBOTS_ROOT}/host/LftFillAdapter.cpp"
     "${TORTOISEBOTS_ROOT}/runtime/BotManager.cpp"
+    "${TORTOISEBOTS_ROOT}/runtime/BotWorldActions.cpp"
+    "${TORTOISEBOTS_ROOT}/runtime/NativeGuildTrades.cpp"
     "${TORTOISEBOTS_ROOT}/runtime/BotActivityLease.cpp"
     "${TORTOISEBOTS_ROOT}/runtime/RandomBotService.cpp"
     "${TORTOISEBOTS_ROOT}/runtime/LftBotFillService.cpp"
@@ -94,6 +97,7 @@ if(TORTOISE_MODULE_CMAKE_PHASE STREQUAL "DISCOVERY")
     "${TORTOISEBOTS_ROOT}/behavior/Movement.cpp"
     "${TORTOISEBOTS_ROOT}/behavior/PlayerConvenience.cpp"
     "${TORTOISEBOTS_ROOT}/commands/BotCommands.cpp"
+    "${TORTOISEBOTS_ROOT}/commands/RandomBotCommands.cpp"
     "${TORTOISEBOTS_ROOT}/commands/BotCommandContext.cpp")
 
   # These are the module-owned runtime and mature AI foundations. The donor

@@ -47,7 +47,8 @@ bool IsNearLeaderValue::Calculate()
     if (groupMaster == bot)
         return true;
 
-    return sServerFacade.getDistance2d(bot, ai->GetGroupMaster()) < sPlayerbotAIConfig.reactDistance;
+    return ai->IsSafe(groupMaster) &&
+        sServerFacade.getDistance2d(bot, groupMaster) < sPlayerbotAIConfig.reactDistance;
 }
 
 uint32 GroupBoolCountValue::Calculate()
@@ -68,7 +69,7 @@ uint32 GroupBoolCountValue::Calculate()
             continue;
 
         if (PAI_VALUE2(bool, "and", getQualifier()))
-            return count++;
+            ++count;
     }
 
     return count;

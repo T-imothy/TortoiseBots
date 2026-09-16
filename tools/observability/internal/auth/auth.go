@@ -83,7 +83,7 @@ func (s *Service) Authenticate(username, password string) (*SessionData, error) 
 	var accountID uint32
 	var rank uint32
 
-	query := `SELECT id, rank FROM account WHERE UPPER(username) = UPPER(?) AND sha_pass_hash = ? LIMIT 1`
+	query := "SELECT id, `rank` FROM account WHERE UPPER(username) = UPPER(?) AND sha_pass_hash = ? LIMIT 1"
 	err := s.db.QueryRow(query, username, hash).Scan(&accountID, &rank)
 	if err != nil {
 		// Fallback query: check if account_access table exists (legacy MaNGOS/Trinity style)

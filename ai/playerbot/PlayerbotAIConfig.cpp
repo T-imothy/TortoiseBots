@@ -149,6 +149,13 @@ bool PlayerbotAIConfig::Initialize()
         return false;
     }
 
+    if (!sRandomBotFacade.LoadPersistentValues())
+    {
+        enabled = false;
+        sLog.outError("TortoiseBots disabled: cannot load ai_playerbot_values; apply the module character migrations and check database errors before enabling bots.");
+        return false;
+    }
+
     ConfigAccess configA(config);
 
     BarGoLink::SetOutputState(config.GetBoolDefault("AiPlayerbot.ShowProgressBars", false));
@@ -300,7 +307,10 @@ bool PlayerbotAIConfig::Initialize()
     enableMinimalMove = config.GetBoolDefault("AiPlayerbot.EnableMinimalMove", true);
 
     transportTeleportType = config.GetIntDefault("AiPlayerbot.TransportTeleportType", 2);
-    randomBotsMaxLoginsPerInterval = config.GetIntDefault("AiPlayerbot.RandomBotsMaxLoginsPerInterval", 10);
+    randomBotsMaxLoginsPerInterval = std::max(0, config.GetIntDefault("AiPlayerbot.RandomBotsMaxLoginsPerInterval", 10));
+    randomBotsMaxCreatesPerInterval = uint32(std::clamp(config.GetIntDefault("AiPlayerbot.RandomBotsMaxCreatesPerInterval", 10), 0, 100));
+    randomBotCreationBudgetMs = uint32(std::clamp(config.GetIntDefault("AiPlayerbot.RandomBotCreationBudgetMs", 5), 1, 1000));
+    randomBotLoginDbQueueLimit = std::max(0, config.GetIntDefault("AiPlayerbot.LoginDbQueueLimit", 256));
     minRandomBotsPriceChangeInterval = config.GetIntDefault("AiPlayerbot.MinRandomBotsPriceChangeInterval", 2 * 3600);
     maxRandomBotsPriceChangeInterval = config.GetIntDefault("AiPlayerbot.MaxRandomBotsPriceChangeInterval", 48 * 3600);
     //Auction house settings
@@ -370,8 +380,12 @@ bool PlayerbotAIConfig::Initialize()
     fleeingEnabled = config.GetBoolDefault("AiPlayerbot.FleeingEnabled", true);
     summonAtInnkeepersEnabled = config.GetBoolDefault("AiPlayerbot.SummonAtInnkeepersEnabled", true);
     randomBotMaxLevel = config.GetIntDefault("AiPlayerbot.RandomBotMaxLevel", DEFAULT_MAX_LEVEL);
+    randomBotMinLevel = config.GetIntDefault("AiPlayerbot.RandomBotMinLevel", 1);
+    randomBotMaxLevelChance = config.GetFloatDefault("AiPlayerbot.RandomBotMaxLevelChance", 0.15f);
+    randomBotTeleportDistance = config.GetIntDefault("AiPlayerbot.RandomBotTeleportDistance", 1000);
     randomBotLoginAtStartup = config.GetBoolDefault("AiPlayerbot.RandomBotLoginAtStartup", false);
     randomBotAutoCreate = config.GetBoolDefault("AiPlayerbot.RandomBotAutoCreate", false);
+    deleteRandomBotAccounts = config.GetBoolDefault("AiPlayerbot.DeleteRandomBotAccounts", false);
     enableRandomTeleports = config.GetBoolDefault("AiPlayerbot.EnableRandomTeleports", false);
     relocateHopelessDeaths = config.GetBoolDefault("AiPlayerbot.RelocateHopelessDeaths", true);
     randomBotLftEnabled = config.GetBoolDefault("AiPlayerbot.RandomBotLftEnabled", false);
@@ -597,6 +611,11 @@ bool PlayerbotAIConfig::Initialize()
     observabilityPort = static_cast<uint32>(config.GetIntDefault("AiPlayerbot.ObservabilityPort", 0));
     observabilityHost = config.GetStringDefault("AiPlayerbot.ObservabilityHost", "");
     enableActionLog = config.GetBoolDefault("AiPlayerbot.EnableActionLog", false);
+    behaviorTrace = config.GetBoolDefault("AiPlayerbot.BehaviorTrace", false);
+    behaviorTraceMap = config.GetIntDefault("AiPlayerbot.BehaviorTraceMap", 0);
+    behaviorTraceX = config.GetFloatDefault("AiPlayerbot.BehaviorTraceX", -800.0f);
+    behaviorTraceY = config.GetFloatDefault("AiPlayerbot.BehaviorTraceY", -530.0f);
+    behaviorTraceRadius = std::max(1.0f, std::min(500.0f, config.GetFloatDefault("AiPlayerbot.BehaviorTraceRadius", 200.0f)));
     botLogFile = config.GetStringDefault("AiPlayerbot.BotLogFile", "bots.log");
     {
         std::string logsDir = sConfig.GetStringDefault("LogsDir", "");

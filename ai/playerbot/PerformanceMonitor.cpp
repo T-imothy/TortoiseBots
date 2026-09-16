@@ -1,6 +1,9 @@
 #include "playerbot.h"
 #include "playerbot/PlayerbotAIConfig.h"
 #include "PerformanceMonitor.h"
+#include "Chat/Chat.h"
+#include "../../commands/BotCommands.h"
+#include <sstream>
 
 #include "Database/DatabaseEnv.h"
 #include "PlayerbotAI.h"
@@ -16,42 +19,38 @@ PerformanceMonitor::~PerformanceMonitor()
 {
 }
 
-std::unique_ptr<PerformanceMonitorOperation> PerformanceMonitor::start(PerformanceMetric metric, std::string name, PerformanceStack* stack, uint32 mapId, uint32 instanceId)
+std::unique_ptr<PerformanceMonitorOperation> PerformanceMonitor::start(PerformanceMetric metric, std::string_view name, PerformanceStack* stack, uint32 mapId, uint32 instanceId)
 {
     if (!sPlayerbotAIConfig.perfMonEnabled)
     {
         return {};
     }
 
-    auto md = mapsData.find(mapId);
-
-    if (md == mapsData.end())
-        return nullptr;
-
-    auto id = md->second.find(instanceId);
-
-    if (id == md->second.end())
-        return nullptr;
+    std::lock_guard<std::mutex> registryGuard(lock);
+    // The optional module has no legacy RandomPlayerbotMgr map-init pass.
+    // Lazily create this map/instance bucket under the registry lock so enabling
+    // monitoring after startup immediately covers existing maps as well.
+    auto& instanceData = mapsData[mapId][instanceId];
 
     std::vector<std::string> localStack;
 
     // Build the key vector efficiently
     if (stack)
     {
-        stack->push_back(name);
+        stack->emplace_back(name);
         localStack = *stack;
     }
     else
     {
-        localStack = {name};
+        localStack = {std::string(name)};
     }
 
-    auto& pd = id->second[metric][localStack];
+    auto& pd = instanceData[metric][localStack];
 
     return std::make_unique<PerformanceMonitorOperation>(pd, name, stack);
 }
 
-std::unique_ptr<PerformanceMonitorOperation> PerformanceMonitor::start(PerformanceMetric metric, std::string name, PlayerbotAI * ai)
+std::unique_ptr<PerformanceMonitorOperation> PerformanceMonitor::start(PerformanceMetric metric, std::string_view name, PlayerbotAI * ai)
 {
     if (!sPlayerbotAIConfig.perfMonEnabled) return NULL;
 
@@ -99,46 +98,47 @@ std::string StackString(const std::vector<std::string>& stack, bool fullStack = 
 
 void PerformanceMonitor::PrintStats(bool perTick, bool fullStack, bool showMap)
 {
-    if (mapsData.empty())
-        return;
-
-    uint32 total = 0;
-
+    uint64 total = 0;
     performanceMetricMap data;
-
-    for (auto& [mapId, mapData] : mapsData)
     {
-        for (auto& [instanceId, instanceData] : mapData)
+        // Copy a coherent counter snapshot; never hold the registry/counter
+        // locks while sorting or printing a potentially long report.
+        std::lock_guard<std::mutex> registryGuard(lock);
+        for (auto& [mapId, mapData] : mapsData)
         {
-            for (auto& [metric, namedData] : instanceData)
+            for (auto& [instanceId, instanceData] : mapData)
             {
-                for (auto& [stack, performanceData] : namedData)
+                for (auto& [metric, namedData] : instanceData)
                 {
-                    std::vector<std::string> newStack = stack;
-
-                    if (showMap)
+                    for (auto& [stack, performanceData] : namedData)
                     {
-                        if (metric != PERF_MON_TOTAL)
-                            newStack[0] = newStack[0] + " " + std::to_string(mapId) + (instanceId ? " (" + std::to_string(instanceId) + ")" : "");
-                        else if (newStack[0].find(" I") != std::string::npos)
-                            newStack[0] = newStack[0] + " " + std::to_string(mapId) + (instanceId ? " (" + std::to_string(instanceId) + ")" : "");
-                        else if (newStack[0].find("PlayerbotAI::UpdateAI") == std::string::npos && newStack[0].find("PlayerbotAIBase::FullTick") == std::string::npos)
-                            newStack[0] = newStack[0] + " " + std::to_string(mapId) + (instanceId ? " (" + std::to_string(instanceId) + ")" : "");
-                        else
-                            newStack[0] = newStack[0];
-                    }
+                        std::lock_guard<std::mutex> counterGuard(performanceData.lock);
+                        std::vector<std::string> newStack = stack;
 
-                    PerformanceData& pd = data[metric][newStack];
+                        if (showMap)
+                        {
+                            if (metric != PERF_MON_TOTAL)
+                                newStack[0] = newStack[0] + " " + std::to_string(mapId) + (instanceId ? " (" + std::to_string(instanceId) + ")" : "");
+                            else if (newStack[0].find(" I") != std::string::npos)
+                                newStack[0] = newStack[0] + " " + std::to_string(mapId) + (instanceId ? " (" + std::to_string(instanceId) + ")" : "");
+                            else if (newStack[0].find("PlayerbotAI::UpdateAI") == std::string::npos && newStack[0].find("PlayerbotAIBase::FullTick") == std::string::npos)
+                                newStack[0] = newStack[0] + " " + std::to_string(mapId) + (instanceId ? " (" + std::to_string(instanceId) + ")" : "");
+                            else
+                                newStack[0] = newStack[0];
+                        }
 
-                    if (performanceData.totalTime > 0)
-                    {
-                        if (!pd.minTime || pd.minTime > performanceData.minTime)
-                            pd.minTime = performanceData.minTime;
-                        if (!pd.maxTime || pd.maxTime < performanceData.minTime)
-                            pd.maxTime = performanceData.minTime;
-                        pd.totalTime += performanceData.totalTime;
+                        PerformanceData& pd = data[metric][newStack];
+
+                        if (performanceData.totalTime > 0)
+                        {
+                            if (!pd.minTime || pd.minTime > performanceData.minTime)
+                                pd.minTime = performanceData.minTime;
+                            if (!pd.maxTime || pd.maxTime < performanceData.maxTime)
+                                pd.maxTime = performanceData.maxTime;
+                            pd.totalTime += performanceData.totalTime;
+                        }
+                        pd.count += performanceData.count;
                     }
-                    pd.count += performanceData.count;
                 }
             }
         }
@@ -147,7 +147,7 @@ void PerformanceMonitor::PrintStats(bool perTick, bool fullStack, bool showMap)
     if (data.empty())
         return;
 
-    uint32 totalCount = 0;
+    uint64 totalCount = 0;
 
     sLog.outString(" ");
     sLog.outString(" ");
@@ -200,17 +200,17 @@ void PerformanceMonitor::PrintStats(bool perTick, bool fullStack, bool showMap)
         stacks.sort([&](std::vector<std::string> i, std::vector<std::string> j) { return nameD.at(i).totalTime < nameD.at(j).totalTime; });
 
         float tPerc = 0, tCount = 0;
-        uint32 tMin = 99999, tMax = 0, tTime = 0;
+        uint64 tMin = UINT64_MAX, tMax = 0, tTime = 0;
 
         sLog.outString("percentage   time    |   min  ..    max (     avg  of     count ) - type : name                        ");
 
         for (auto& stack : stacks)
         {
             PerformanceData& pd = namedData[stack];
-            float perc = (float)pd.totalTime / (float)total * 100.0f;
-            float secs = (float)pd.totalTime / (perTick ? totalCount : 1000.0f);
-            float avg = (float)pd.totalTime / (float)pd.count;
-            float amount = (float)pd.count / (perTick ? (float)totalCount : 1);
+            float perc = total ? (float)pd.totalTime / (float)total * 100.0f : 0.0f;
+            float secs = (float)pd.totalTime / (perTick ? std::max<uint64>(1, totalCount) : 1000.0f);
+            float avg = pd.count ? (float)pd.totalTime / (float)pd.count : 0.0f;
+            float amount = (float)pd.count / (perTick ? (float)std::max<uint64>(1, totalCount) : 1);
 
             std::string disName = StackString(stack, fullStack);
             if (!fullStack && disName.find("|") != std::string::npos)
@@ -219,9 +219,9 @@ void PerformanceMonitor::PrintStats(bool perTick, bool fullStack, bool showMap)
             if (perc > 0.1)
             {
                 if (perTick)
-                    sLog.outString("%7.3f%% %9ums | %6u .. %6u (%9.2f of %10.2f) - %s    : %s", perc, (uint32)secs, pd.minTime, pd.maxTime, avg, amount, key.c_str(), disName.c_str());
+                    sLog.outString("%7.3f%% %9ums | " UI64FMTD " .. " UI64FMTD " (%9.2f of %10.2f) - %s    : %s", perc, (uint32)secs, pd.minTime, pd.maxTime, avg, amount, key.c_str(), disName.c_str());
                 else
-                    sLog.outString("%7.3f%% %10.3fs | %6u .. %6u (%9.4f of %10u) - %s    : %s", perc, secs, pd.minTime, pd.maxTime, avg, (uint32)amount, key.c_str(), disName.c_str());
+                    sLog.outString("%7.3f%% %10.3fs | " UI64FMTD " .. " UI64FMTD " (%9.4f of %10u) - %s    : %s", perc, secs, pd.minTime, pd.maxTime, avg, (uint32)amount, key.c_str(), disName.c_str());
 
             }
 
@@ -247,26 +247,27 @@ void PerformanceMonitor::PrintStats(bool perTick, bool fullStack, bool showMap)
             }
         }
 
-        float secs = tTime / (perTick ? totalCount : 1000.0f);
-        float avg = tTime / tCount;
+        float secs = tTime / (perTick ? std::max<uint64>(1, totalCount) : 1000.0f);
+        float avg = tCount ? tTime / tCount : 0.0f;
 
         if (metric != PERF_MON_TOTAL)
         {
             if (perTick)
-                sLog.outString("%7.3f%% %9ums | %6u .. %6u (%9.4f of %10.2f) - %s    : %s", tPerc, (uint32)secs, tMin, tMax, avg, tCount, key.c_str(), "TOTAL");
+                sLog.outString("%7.3f%% %9ums | " UI64FMTD " .. " UI64FMTD " (%9.4f of %10.2f) - %s    : %s", tPerc, (uint32)secs, tMin, tMax, avg, tCount, key.c_str(), "TOTAL");
             else
-                sLog.outString("%7.3f%% %10.3fs | %6u .. %6u (%9.2f of %10u) - %s    : %s", tPerc, secs, tMin, tMax, avg, (uint32)tCount, key.c_str(), "TOTAL");
+                sLog.outString("%7.3f%% %10.3fs | " UI64FMTD " .. " UI64FMTD " (%9.2f of %10u) - %s    : %s", tPerc, secs, tMin, tMax, avg, (uint32)tCount, key.c_str(), "TOTAL");
         }
         sLog.outString(" ");
     }
 
-    uint32 maxMapTime = 0;
+    uint64 maxMapTime = 0;
 
     for (auto& [stack, performanceData] : data[PERF_MON_TOTAL])
         if (stack[0].find("PlayerbotAI::UpdateAI ") == 0)
             maxMapTime = std::max(performanceData.totalTime, maxMapTime);
 
-    if (total)
+    if (total && data[PERF_MON_TOTAL][{"PlayerbotAIBase::FullTick"}].count &&
+        data[PERF_MON_TOTAL][{"PlayerbotAIBase::FullTick"}].totalTime)
     {
         float avgDiff = data[PERF_MON_TOTAL][{"PlayerbotAIBase::FullTick"}].totalTime / data[PERF_MON_TOTAL][{"PlayerbotAIBase::FullTick"}].count;
         float aiPerc = (maxMapTime * 100.0f) / (float)(data[PERF_MON_TOTAL][{"PlayerbotAIBase::FullTick"}].totalTime);
@@ -279,6 +280,7 @@ void PerformanceMonitor::PrintStats(bool perTick, bool fullStack, bool showMap)
 
 void PerformanceMonitor::Reset()
 {
+    std::lock_guard<std::mutex> registryGuard(lock);
     for (auto& [mapId, mapData] : mapsData)
     {
         for (auto& [instanceId, instanceData] : mapData)
@@ -287,6 +289,7 @@ void PerformanceMonitor::Reset()
             {
                 for (auto& [name, performanceData] : namedData)
                 {
+                    std::lock_guard<std::mutex> counterGuard(performanceData.lock);
                     performanceData.minTime = performanceData.maxTime = performanceData.totalTime = performanceData.count = 0;
                 }
             }
@@ -298,15 +301,16 @@ void PerformanceMonitor::Init(uint32 mapId, uint32 instanceId)
 {
     if (sPlayerbotAIConfig.perfMonEnabled)
     {
+        std::lock_guard<std::mutex> registryGuard(lock);
         mapsData[mapId][instanceId];
     }
 }
 
 } // namespace bot_perf — close before global PerformanceMonitorOperation impl
 
-PerformanceMonitorOperation::PerformanceMonitorOperation(PerformanceData& data, std::string name, PerformanceStack* stack) : data(data), name(name), stack(stack)
+PerformanceMonitorOperation::PerformanceMonitorOperation(PerformanceData& data, std::string_view name, PerformanceStack* stack) : data(data), name(name), stack(stack)
 {
-    started = (std::chrono::time_point_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now())).time_since_epoch();
+    started = (std::chrono::time_point_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now())).time_since_epoch();
 }
 
 PerformanceMonitorOperation::~PerformanceMonitorOperation()
@@ -316,26 +320,81 @@ PerformanceMonitorOperation::~PerformanceMonitorOperation()
 
 void PerformanceMonitorOperation::finish()
 {
-    if (!sPlayerbotAIConfig.perfMonEnabled)
-        return;
-
-    std::chrono::milliseconds finished = (std::chrono::time_point_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now())).time_since_epoch();
-    uint32 elapsed = (finished - started).count();
-
-   // std::lock_guard<std::mutex> guard(data.lock);
-    if (elapsed > 0)
+    // An operation already started must always finish and balance its stack,
+    // even if monitoring has been disabled in the meantime.
+    auto const finished = std::chrono::time_point_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now()).time_since_epoch();
+    uint64 const elapsed = uint64((finished - started).count());
     {
-        if (!data.minTime || data.minTime > elapsed)
-            data.minTime = elapsed;
-        if (!data.maxTime || data.maxTime < elapsed)
-            data.maxTime = elapsed;
-        data.totalTime += elapsed;
+        std::lock_guard<std::mutex> guard(data.lock);
+        if (elapsed > 0)
+        {
+            if (!data.minTime || data.minTime > elapsed) data.minTime = elapsed;
+            if (data.maxTime < elapsed) data.maxTime = elapsed;
+            data.totalTime += elapsed;
+        }
+        ++data.count;
     }
-    data.count++;
-
+    // Each AI owns its nesting stack. Remove only this operation's most recent
+    // frame; recursive operations with the same name retain their outer frame.
     if (stack)
-        stack->erase(std::remove(stack->begin(), stack->end(), name), stack->end());
+    {
+        auto frame = std::find(stack->rbegin(), stack->rend(), name);
+        if (frame != stack->rend()) stack->erase(std::next(frame).base());
+    }
 }
+
+namespace TortoiseBots { namespace BotCommands {
+bool HandlePerformanceCommand(ChatHandler* handler, char const* args)
+{
+    if (!handler) return false;
+    ChatCommand const* command = handler->FindCommand("perfmon");
+    if (!command || !handler->IsCommandAvailable(*command))
+    {
+        handler->SendSysMessage("You do not have permission to manage bot performance monitoring.");
+        return true;
+    }
+    std::istringstream input(args ? args : "");
+    std::string token;
+    bool tick = false, stack = false, map = false;
+    while (input >> token)
+    {
+        if (token == "reset" || token == "toggle")
+        {
+            std::string extra;
+            if (tick || stack || map || (input >> extra))
+            {
+                handler->SendSysMessage("Usage: .perfmon [tick] [stack] [map] | reset | toggle");
+                return true;
+            }
+            if (token == "reset")
+            {
+                sPerformanceMonitor.Reset();
+                handler->SendSysMessage("Bot performance monitor reset.");
+            }
+            else
+            {
+                // Native command dispatch owns the world control phase.
+                sPlayerbotAIConfig.perfMonEnabled = !sPlayerbotAIConfig.perfMonEnabled;
+                handler->SendSysMessage(sPlayerbotAIConfig.perfMonEnabled ?
+                    "Bot performance monitor enabled." : "Bot performance monitor disabled.");
+            }
+            return true;
+        }
+        if (token == "tick") tick = true;
+        else if (token == "stack") stack = true;
+        else if (token == "map") map = true;
+        else
+        {
+            handler->SendSysMessage("Usage: .perfmon [tick] [stack] [map] | reset | toggle");
+            return true;
+        }
+    }
+    sPerformanceMonitor.PrintStats(tick, stack, map);
+    handler->SendSysMessage("Bot performance report written to the server console/log.");
+    return true;
+}
+} }
 
 // The host owns the legacy ChatHandler::HandlePerfMonCommand symbol. Keeping
 // the monitor implementation here avoids a second definition when the

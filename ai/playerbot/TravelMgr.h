@@ -4,6 +4,7 @@
 #include "GuidPosition.h"
 #include <functional>
 #include <utility>
+#include <mutex>
 #include "strategy/values/TravelValues.h"
 #include "WorldSquare.h"
 
@@ -505,6 +506,7 @@ namespace ai
 		GatherTravelDestination fishMap;
 		std::list<AsyncGuidPosition> fishPoints;
 		std::unordered_map<uint32, int32> areaLevels;
+		mutable std::recursive_mutex areaLevelsMutex;
 
 		std::mutex getDestinationMutex;
 		std::condition_variable getDestinationVar;

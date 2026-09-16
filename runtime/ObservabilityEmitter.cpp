@@ -27,6 +27,7 @@
 #include "Player.h"
 #include "World.h"
 #include "Log.h"
+#include "../host/ModuleLog.h"
 #include "Timer.h"
 #include "MotionMaster.h"
 #include <cmath>
@@ -232,6 +233,7 @@ ObservabilityEmitter::~ObservabilityEmitter()
 
 void ObservabilityEmitter::Initialize()
 {
+    std::lock_guard<std::recursive_mutex> stateGuard(m_stateMutex);
     // Re-initialization must not leak the previous socket or stale state.
     Shutdown();
 
@@ -308,11 +310,12 @@ void ObservabilityEmitter::Initialize()
         m_destAddr = addr;
     }
 
-    sLog.outString("TortoiseBots: Observability telemetry active on %s:%u", m_host.c_str(), m_port);
+    TB_LOG_BASIC("TortoiseBots: Observability telemetry active on %s:%u", m_host.c_str(), m_port);
 }
 
 void ObservabilityEmitter::Shutdown()
 {
+    std::lock_guard<std::recursive_mutex> stateGuard(m_stateMutex);
     {
         std::lock_guard<std::mutex> lock(m_socketMutex);
         if (m_socketFd != kInvalidSocket)
@@ -344,11 +347,18 @@ void ObservabilityEmitter::Shutdown()
 
 bool ObservabilityEmitter::IsEnabled() const
 {
+    std::lock_guard<std::recursive_mutex> stateGuard(m_stateMutex);
     return m_enabled && m_socketFd != kInvalidSocket;
+}
+
+void ObservabilityEmitter::SetExternalRosterProvider(std::function<void(std::vector<Player*>&)> provider)
+{
+    m_externalRosterProvider = std::move(provider);
 }
 
 void ObservabilityEmitter::SendDatagram(std::string const& payload)
 {
+    std::lock_guard<std::recursive_mutex> stateGuard(m_stateMutex);
     if (!IsEnabled())
         return;
 
@@ -383,6 +393,7 @@ void ObservabilityEmitter::SendDatagram(std::string const& payload)
 
 bool ObservabilityEmitter::AnomalyAllowed(uint32 guid, uint8 typeId, uint32 nowMs)
 {
+    std::lock_guard<std::recursive_mutex> stateGuard(m_stateMutex);
     uint64 key = (static_cast<uint64>(guid) << 8) | typeId;
     auto it = m_anomalyCooldowns.find(key);
     if (it != m_anomalyCooldowns.end() && (nowMs - it->second) < kAnomalyCooldownMs)
@@ -402,6 +413,7 @@ void ObservabilityEmitter::EmitAnomaly(std::string const& type,
                                         std::string const& strategy,
                                         std::string const& lastAction)
 {
+    std::lock_guard<std::recursive_mutex> stateGuard(m_stateMutex);
     if (!IsEnabled())
         return;
 
@@ -446,6 +458,7 @@ void ObservabilityEmitter::OnActionFailed(Player* bot,
                                           std::string const& targetName,
                                           std::string const& strategy)
 {
+    std::lock_guard<std::recursive_mutex> stateGuard(m_stateMutex);
     if (!IsEnabled() || !bot)
         return;
 
@@ -477,6 +490,7 @@ void ObservabilityEmitter::OnActionFailed(Player* bot,
 
 void ObservabilityEmitter::AddStateTime(size_t stateIndex, uint32 diff)
 {
+    std::lock_guard<std::recursive_mutex> stateGuard(m_stateMutex);
     if (stateIndex >= kStateCount || diff == 0)
         return;
 
@@ -494,6 +508,7 @@ void ObservabilityEmitter::AddStateTime(size_t stateIndex, uint32 diff)
 
 void ObservabilityEmitter::PruneState(uint32 nowMs)
 {
+    std::lock_guard<std::recursive_mutex> stateGuard(m_stateMutex);
     for (auto it = m_botTracking.begin(); it != m_botTracking.end();)
     {
         if ((nowMs - it->second.lastSeenMs) > kBotTrackingTtlMs)
@@ -525,11 +540,14 @@ void ObservabilityEmitter::PruneState(uint32 nowMs)
 
 void ObservabilityEmitter::Update(uint32 diff)
 {
+    std::lock_guard<std::recursive_mutex> stateGuard(m_stateMutex);
     if (!IsEnabled())
         return;
 
     uint32 nowMs = WorldTimer::getMSTime();
     std::vector<Player*> activeBots = BotManager::Instance().GetAllBots();
+    if (m_externalRosterProvider)
+        m_externalRosterProvider(activeBots);
 
     for (Player* bot : activeBots)
     {
@@ -624,6 +642,7 @@ void ObservabilityEmitter::Update(uint32 diff)
 
 void ObservabilityEmitter::EmitSnapshotCycle(std::vector<Player*> const& activeBots, uint32 diff)
 {
+    std::lock_guard<std::recursive_mutex> stateGuard(m_stateMutex);
     std::vector<BotTelemetrySnapshot> botSnapshots;
     botSnapshots.reserve(activeBots.size());
 
@@ -689,7 +708,8 @@ void ObservabilityEmitter::EmitSnapshotCycle(std::vector<Player*> const& activeB
 
     uint32 activeSessions = sWorld.GetActiveSessionCount();
     uint32 botCount = static_cast<uint32>(botSnapshots.size());
-    uint32 humanCount = activeSessions > botCount ? (activeSessions - botCount) : 0;
+    // Native headless sessions live outside World::m_sessions.
+    uint32 humanCount = activeSessions;
 
     std::map<std::pair<std::string, std::string>, uint32> countMap;
     for (BotTelemetrySnapshot const& b : botSnapshots)

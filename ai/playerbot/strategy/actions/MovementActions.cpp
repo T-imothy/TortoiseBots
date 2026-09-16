@@ -1,3 +1,5 @@
+#include "runtime/BotWorldActions.h"
+#include "playerbot/BotDiagnostics.h"
 
 #include "playerbot/playerbot.h"
 #include "playerbot/PerformanceMonitor.h"
@@ -113,10 +115,12 @@ bool MovementAction::UseTaxi(PlayerbotAI* ai, uint32 entry, bool needNpc, Creatu
     if (!fromNode || !toNode || !fromNode->MountCreatureID[factionIndex] ||
         !toNode->MountCreatureID[factionIndex])
     {
+        ai::botdiag::TraceBehavior(ai, "taxi_reject", "endpoint or faction mount missing", entry);
         return false;
     }
     if (!bot->isTaxiCheater() && !bot->GetTaxi().IsTaximaskNodeKnown(tEntry->to))
     {
+        ai::botdiag::TraceBehavior(ai, "taxi_reject", "destination not learned", entry);
         return false;
     }
 
@@ -166,6 +170,7 @@ bool MovementAction::UseTaxi(PlayerbotAI* ai, uint32 entry, bool needNpc, Creatu
 
         if (!unit)
         {
+            ai::botdiag::TraceBehavior(ai, "taxi_reject", "no matching interactable flight master", entry);
             return false;
         }
 
@@ -179,6 +184,7 @@ bool MovementAction::UseTaxi(PlayerbotAI* ai, uint32 entry, bool needNpc, Creatu
 
     if (!bot->isTaxiCheater() && !bot->GetTaxi().IsTaximaskNodeKnown(tEntry->from))
     {
+        ai::botdiag::TraceBehavior(ai, "taxi_reject", "source not learned after discovery", entry);
         return false;
     }
 
@@ -193,6 +199,7 @@ bool MovementAction::UseTaxi(PlayerbotAI* ai, uint32 entry, bool needNpc, Creatu
     ai->Unmount();
 
     bool goTaxi = bot->ActivateTaxiPathTo({tEntry->from, tEntry->to}, unit, 1);
+    ai::botdiag::TraceBehavior(ai, "taxi_activate", goTaxi ? "accepted" : "native activation rejected", entry);
 
     if (!goTaxi)
         bot->SetMoney(botMoney);
@@ -754,14 +761,15 @@ void MovementAction::UpdateFlyingState(
 {
 }
 
-void MovementAction::DispatchMovement(TravelPath movePath, bool generatePath, bool masterWalking)
+bool MovementAction::DispatchMovement(TravelPath movePath, bool generatePath, bool masterWalking)
 {
     std::vector<WorldPosition> path = movePath.GetPointPath();
-    if (path.empty()) return;
+    // Reject degenerate routes so the caller retries or abandons the target.
+    if (path.size() < 2) return false;
     MotionMaster& mm = *bot->GetMotionMaster();
     mm.Clear();
     ForcedMovement mode = masterWalking ? FORCED_MOVEMENT_WALK : FORCED_MOVEMENT_RUN;
-    if (!generatePath || bot->IsFreeFlying() || path.size() < 2)
+    if (!generatePath || bot->IsFreeFlying())
     {
         WorldPosition destination = path.back();
         uint32 options = masterWalking ? MOVE_WALK_MODE : MOVE_RUN_MODE;
@@ -774,6 +782,7 @@ void MovementAction::DispatchMovement(TravelPath movePath, bool generatePath, bo
         // route corner when clipping has left it ahead of the moving player.
         if (path.front().distance(bot) > 0.01f) path.insert(path.begin(), WorldPosition(bot));
         GeneratePathAvoidingHazards(path);
+        if (path.size() < 2) return false;
         auto points = WorldPosition().toPointsArray(path);
         for (auto& point : points)
         {
@@ -785,6 +794,7 @@ void MovementAction::DispatchMovement(TravelPath movePath, bool generatePath, bo
         mm.MovePath(points, mode, false, masterWalking);
     }
     WaitForReach(WorldPosition().GetPathLength(path));
+    return true;
 }
 
 Unit* MovementAction::GetMover(Player* bot)
@@ -1002,7 +1012,7 @@ bool MovementAction::MoveTo2(const WorldPosition& endPos, bool idle, bool react,
     {
         if (Unit* master = ai->GetMaster())
         {
-            if (sServerFacade.IsFriendlyTo(bot, master) && master->m_movementInfo.HasMovementFlag(MOVEFLAG_WALK_MODE) && sServerFacade.getDistance2d(bot, master) < sPlayerbotAIConfig.walkDistance
+            if (ai->IsSafe(master) && sServerFacade.IsFriendlyTo(bot, master) && master->m_movementInfo.HasMovementFlag(MOVEFLAG_WALK_MODE) && sServerFacade.getDistance2d(bot, master) < sPlayerbotAIConfig.walkDistance
                 && ai->GetState() != BotState::BOT_STATE_COMBAT)
             {
                 masterWalking = true;
@@ -1077,7 +1087,11 @@ bool MovementAction::MoveTo2(const WorldPosition& endPos, bool idle, bool react,
     }
     // END DEBUG
 
-    DispatchMovement(movePath, generatePath, masterWalking);
+    if (!DispatchMovement(movePath, generatePath, masterWalking))
+    {
+        lastMove.setPath(TravelPath());
+        return false; // nowhere to go: let the caller retry later or drop the target
+    }
 
     if (!idle)
         ClearIdleState();
@@ -1170,7 +1184,7 @@ bool MovementAction::IsMovingAllowed(Unit* target)
     if (!target)
         return false;
 
-    if (bot->GetMapId() != target->GetMapId())
+    if (!ai->IsSafe(target))
         return false;
 
     float distance = sServerFacade.getDistance2d(bot, target);
@@ -1214,7 +1228,12 @@ void MovementAction::UpdateMovementState()
 bool MovementAction::Follow(Unit* target, float distance, float angle)
 {
     if (!ai->IsSafe(target))
-        return MoveTo2(target);
+    {
+        // Cross-map follow is resumed by the action's world-owner boundary.
+        // Never implicitly copy a foreign Unit position on a map worker.
+        if (TortoiseBots::BotWorldActions::IsMapExecution()) return false;
+        return target && MoveTo2(target);
+    }
 
     MotionMaster &mm = *bot->GetMotionMaster();
 

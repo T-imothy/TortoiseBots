@@ -1,4 +1,5 @@
 #pragma once
+#include "playerbot/strategy/WorldCalculatedValue.h"
 #include "playerbot/PlayerbotAI.h"
 #include "playerbot/strategy/AiObjectContext.h"
 
@@ -56,10 +57,10 @@ namespace ai
        std::vector<std::string> QualifierToEntryList(const std::string& qualifier);
     };
 
-    class RangeFilterValue : public GuidPositionListCalculatedValue, public Qualified
+    class RangeFilterValue : public WorldCalculatedValue<std::list<GuidPosition>>, public Qualified
     {
     public:
-        RangeFilterValue(PlayerbotAI* ai, std::string name = "range filter") : GuidPositionListCalculatedValue(ai, name, 1), Qualified() {}
+        RangeFilterValue(PlayerbotAI* ai, std::string name = "range filter") : WorldCalculatedValue<std::list<GuidPosition>>(ai, name, 1), Qualified() {}
 
         virtual std::list<GuidPosition> Calculate() override;
 

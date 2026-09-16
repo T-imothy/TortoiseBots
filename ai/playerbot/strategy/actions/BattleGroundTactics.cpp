@@ -6,6 +6,7 @@
 #include "Battlegrounds/BattleGround.h"
 #include "Battlegrounds/BattleGroundMgr.h"
 #include "BattleGroundTactics.h"
+#include "playerbot/strategy/values/BattlegroundObjectiveValue.h"
 #include "float.h"
 
 using namespace ai;
@@ -48,14 +49,14 @@ enum BattleBotWsgWaitSpot
     BB_WSG_WAIT_SPOT_RIGHT
 };
 
-std::vector<uint32> const vFlagsAB = { BG_AB_BANNER_ALLIANCE , BG_AB_BANNER_CONTESTED_A , BG_AB_BANNER_HORDE , BG_AB_BANNER_CONTESTED_H ,
-                                       BG_AB_BANNER_STABLE, BG_AB_BANNER_BLACKSMITH, BG_AB_BANNER_FARM, BG_AB_BANNER_LUMBER_MILL,
-                                       BG_AB_BANNER_MINE };
+// Native banner GO entries; compatibility shim constants are node indices.
+std::vector<uint32> const vFlagsAB = { 180058, 180059, 180060, 180061,
+                                     180087, 180088, 180089, 180090, 180091 };
 
 std::vector<uint32> const vFlagsWS = { GO_WS_SILVERWING_FLAG, GO_WS_WARSONG_FLAG, GO_WS_SILVERWING_FLAG_DROP, GO_WS_WARSONG_FLAG_DROP };
-static std::map<uint32, GameObject*> botSelectedObjectives;
-static std::map<uint32, uint32> botObjectiveSelectionTime;
-static std::map<uint32, uint32> botLastObjectiveCheckTime;
+
+
+
 
 
 
@@ -2500,16 +2501,7 @@ bool BGTactics::selectObjective(bool reset)
         // Common setup for both HORDE and ALLIANCE
         uint32 role = context->GetValue<uint32>("bg role")->Get();
         bool defender = role < 5;
-        uint32 botGUID = bot->GetGUIDLow();
-
-        bool isDead = bot->IsDead();
-
-        if (isDead && (botSelectedObjectives[botGUID] != nullptr))
-        {
-            bot->Say("I'm dead, guess I'll reset my objective.", LANG_UNIVERSAL);
-            botSelectedObjectives[botGUID] = nullptr; // Reset objective if we die... maybe more lucky elsewhere -- wait I don't think this is executed on dead bots so it's never triggered? Try something else
-            botObjectiveSelectionTime[botGUID] = 0;
-        }
+        GameObject* previousObjective = PreviousAbObjective();
 
         std::set<GameObject*> uniqueObjectives;
 
@@ -2537,13 +2529,12 @@ bool BGTactics::selectObjective(bool reset)
 
 
         // Check if the bot has previously selected an objective and if it's still valid
-        if (botSelectedObjectives.find(botGUID) != botSelectedObjectives.end() &&
-            uniqueObjectives.find(botSelectedObjectives[botGUID]) != uniqueObjectives.end())
+        if (previousObjective && uniqueObjectives.find(previousObjective) != uniqueObjectives.end())
         {
-            uint32 elapsedTime = WorldTimer::getMSTime() - botObjectiveSelectionTime[botGUID];
+            uint32 elapsedTime = WorldTimer::getMSTime() - AI_VALUE(BattlegroundObjectiveState*, "battleground objective memory")->selectedAt;
             float probabilityToKeepSameObjective = 1.0f; // Start at 100% then lower over time
 
-            GameObject* lastObj = botSelectedObjectives[botGUID];
+            GameObject* lastObj = previousObjective;
             float const lastObjDist = bot->GetDistance(lastObj);
 
             if (lastObjDist < 50.00f) // if we are close, stick to the objective a bit longer
@@ -2558,7 +2549,7 @@ bool BGTactics::selectObjective(bool reset)
 
                 if (randomValue <= probabilityToKeepSameObjective)
                 {
-                    BgObjective = botSelectedObjectives[botGUID];
+                    BgObjective = previousObjective;
                 }
                 else uniqueObjectives.erase(lastObj);
             }
@@ -2574,7 +2565,7 @@ bool BGTactics::selectObjective(bool reset)
 
                 if (randomValue <= probabilityToKeepSameObjective)
                 {
-                    BgObjective = botSelectedObjectives[botGUID];
+                    BgObjective = previousObjective;
                 }
                 else uniqueObjectives.erase(lastObj);
             }
@@ -2587,8 +2578,7 @@ bool BGTactics::selectObjective(bool reset)
 
             // Select a random objective from your unique objectives
             BgObjective = objectives[urand(0, objectives.size() - 1)];
-            botSelectedObjectives[botGUID] = BgObjective; // Remember this objective for the bot
-            botObjectiveSelectionTime[botGUID] = WorldTimer::getMSTime(); // Remember the time of selection
+            RememberAbObjective(BgObjective);
         }
 
         if (BgObjective)
@@ -2937,6 +2927,19 @@ bool BGTactics::startNewPathFree(std::vector<BattleBotPath*> const& vPaths)
     return moveToObjectiveWp(currentPath, currentPoint, reverse);
 }
 
+bool BGTactics::CanAttemptAbCapture()
+{
+    // The existing qualified value belongs to this bot's AI context. Do not
+    // introduce a shared GUID map across concurrently updated battlegrounds.
+    auto* lastCast = context->GetValue<time_t>("last spell cast time", "capture banner");
+    time_t const now = time(nullptr);
+    time_t const previous = lastCast->Get();
+    if (previous && now >= previous && now - previous < 4)
+        return false;
+    lastCast->Set(now);
+    return true;
+}
+
 bool BGTactics::atFlag(std::vector<BattleBotPath*> const& vPaths, std::vector<uint32> const& vFlagIds)
 {
     BattleGround *bg = bot->GetBattleGround();
@@ -2959,7 +2962,18 @@ bool BGTactics::atFlag(std::vector<BattleBotPath*> const& vPaths, std::vector<ui
     {
     case BATTLEGROUND_AB:
     {
-        closeObjects = *context->GetValue<std::list<ObjectGuid> >("closest game objects static los");
+        // Ground-level static rays can hide banners on raised AB platforms.
+        // Keep native range, banner eligibility and capture-spell checks below.
+        {
+            std::list<ObjectGuid> const noLos =
+                *context->GetValue<std::list<ObjectGuid> >("nearest game objects no los");
+            for (ObjectGuid const& guid : noLos)
+            {
+                GameObject* go = ai->GetGameObject(guid);
+                if (go && bot->IsWithinDistInMap(go, INTERACTION_DISTANCE))
+                    closeObjects.push_back(guid);
+            }
+        }
         closePlayers = *context->GetValue<std::list<ObjectGuid> >("closest friendly players");
         flagRange = INTERACTION_DISTANCE;
         break;
@@ -3003,7 +3017,12 @@ bool BGTactics::atFlag(std::vector<BattleBotPath*> const& vPaths, std::vector<ui
         if (f == vFlagIds.end())
             continue;
 
-        if (!sServerFacade.isSpawned(go) || go->getLootState() != GO_READY || go->GetGoState() != GO_STATE_READY)
+        // AB assault banners use native capture completion to validate node,
+        // match status and ownership; in-use buttons remain valid targets.
+        bool const abBanner = (bgType == BATTLEGROUND_AB);
+        if (!sServerFacade.isSpawned(go))
+            continue;
+        if (!abBanner && (go->IsInUse() || go->GetGoState() != GO_STATE_READY))
             continue;
 
         // Test the cheap side first: CanInteract logs a core error when the bot
@@ -3041,6 +3060,8 @@ bool BGTactics::atFlag(std::vector<BattleBotPath*> const& vPaths, std::vector<ui
             SpellEntry const *spellInfo = sServerFacade.LookupSpellInfo(SPELL_CAPTURE_BANNER);
             if (!spellInfo)
                 return false;
+            if (!CanAttemptAbCapture())
+                continue;
 
             Spell *spell = new Spell(bot, spellInfo, false);
             spell->m_targets.setGOTarget(go);
@@ -3219,3 +3240,26 @@ uint32 BGTactics::getDefendersCount(Position point, float range, bool combat)
 
     return defCount;
 }
+
+GameObject* BGTactics::PreviousAbObjective()
+{
+    auto* memory = AI_VALUE(BattlegroundObjectiveState*, "battleground objective memory");
+    if (bot->IsDead() || !bot->IsInWorld() ||
+        memory->mapGeneration != bot->GetMapWorkGeneration())
+    {
+        memory->guid.Clear();
+        memory->selectedAt = 0;
+        memory->mapGeneration = bot->GetMapWorkGeneration();
+        return nullptr;
+    }
+    return memory->guid.IsEmpty() ? nullptr : bot->GetMap()->GetGameObject(memory->guid);
+}
+
+void BGTactics::RememberAbObjective(GameObject* objective)
+{
+    auto* memory = AI_VALUE(BattlegroundObjectiveState*, "battleground objective memory");
+    memory->guid = objective ? objective->GetObjectGuid() : ObjectGuid();
+    memory->mapGeneration = bot->GetMapWorkGeneration();
+    memory->selectedAt = WorldTimer::getMSTime();
+}
+// End AI-owned Arathi objective memory.

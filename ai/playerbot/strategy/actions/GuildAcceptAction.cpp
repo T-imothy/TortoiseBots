@@ -1,5 +1,6 @@
 
 #include "playerbot/playerbot.h"
+#include "runtime/BotWorldActions.h"
 #include "GuildAcceptAction.h"
 #include "playerbot/ServerFacade.h"
 #include "Guild/GuildMgr.h"
@@ -8,6 +9,9 @@ using namespace ai;
 
 bool GuildAcceptAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
+
     Player* requester = event.GetOwner() ? event.GetOwner() : GetMaster();
     WorldPacket p(event.GetPacket());
     p.rpos(0);
@@ -56,7 +60,12 @@ bool GuildAcceptAction::Execute(Event& event)
 
     Guild* guild = sGuildMgr.GetGuildById(guildId);
 
-    if(guild && guild->GetMemberSize() > 1000)
+    // The invitation packet may outlive the guild or be superseded by another
+    // invite. Never accept a different native invitation using this requester.
+    if (!guild || bot->GetGuildIdInvited() != guildId)
+        return false;
+
+    if(guild->GetMemberSize() > 1000)
     {
         ai->TellError(requester, "This guild has over 1000 members. To stop it from reaching the 1064 member limit I refuse to join it.");
 
@@ -78,6 +87,10 @@ bool GuildAcceptAction::Execute(Event& event)
     if (accept)
     {
         bot->GetSession()->HandleGuildAcceptOpcode(packet);
+        // Native acceptance can reject faction, membership or admission checks.
+        // Publish notes/logging only after this exact guild admitted the bot.
+        if (bot->GetGuildId() != guildId || !guild->GetMemberSlot(bot->GetObjectGuid()))
+            return false;
 
         TalentSpec::SetPublicNote(bot);
 
@@ -89,3 +102,4 @@ bool GuildAcceptAction::Execute(Event& event)
     }
     return true;
 }
+// End native guild actions.

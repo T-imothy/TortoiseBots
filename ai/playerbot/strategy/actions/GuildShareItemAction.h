@@ -8,6 +8,7 @@ namespace ai
     class GuildShareItemAction : public Action
     {
     public:
+        bool RequiresWorldOwner() const override { return true; }
         GuildShareItemAction(PlayerbotAI* ai) : Action(ai, "guild share item") {}
 
         bool Execute(Event& event) override;

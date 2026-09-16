@@ -374,11 +374,7 @@ bool ShouldTravelNamedValue::Calculate()
         if (!bot->GetGuildId())
             return false;
 
-        Guild* guild = sGuildMgr.GetGuildById(bot->GetGuildId());
-        if (!guild)
-            return false;
-
-        std::string motd = guild->GetMOTD();
+        std::string motd = AI_VALUE(std::string, "guild motd");
         if (motd.empty())
             return false;
 

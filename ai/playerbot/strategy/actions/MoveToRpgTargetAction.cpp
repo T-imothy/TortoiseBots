@@ -1,3 +1,4 @@
+#include "playerbot/BotDiagnostics.h"
 
 #include "playerbot/playerbot.h"
 #include "MoveToRpgTargetAction.h"
@@ -38,6 +39,7 @@ bool MoveToRpgTargetAction::Execute(Event& event)
 
             if (guidPP.IsPlayer())
             {
+                ai::botdiag::TraceBehavior(ai, "rpg_drop", "player target is pursuing another player");
                 AI_VALUE(std::set<ObjectGuid>&,"ignore rpg target").insert(AI_VALUE(GuidPosition, "rpg target"));
 
                 RESET_AI_VALUE(GuidPosition, "rpg target");
@@ -53,6 +55,7 @@ bool MoveToRpgTargetAction::Execute(Event& event)
 
     if (unit && unit->IsMoving() && !urand(0, 20) && guidP.sqDistance2d(bot) < INTERACTION_DISTANCE * INTERACTION_DISTANCE * 2)
     {
+        ai::botdiag::TraceBehavior(ai, "rpg_drop", "moving target random abandonment");
         AI_VALUE(std::set<ObjectGuid>&,"ignore rpg target").insert(AI_VALUE(GuidPosition, "rpg target"));
 
         RESET_AI_VALUE(GuidPosition,"rpg target");
@@ -66,6 +69,7 @@ bool MoveToRpgTargetAction::Execute(Event& event)
 
     if (!CanFreeMoveValue::CanFreeMoveTo(ai, wo))
     {
+        ai::botdiag::TraceBehavior(ai, "rpg_drop", "outside free movement range");
         AI_VALUE(std::set<ObjectGuid>&, "ignore rpg target").insert(AI_VALUE(GuidPosition, "rpg target"));
 
         RESET_AI_VALUE(GuidPosition, "rpg target");
@@ -79,6 +83,7 @@ bool MoveToRpgTargetAction::Execute(Event& event)
 
     if (guidP.distance(bot) > sPlayerbotAIConfig.reactDistance * 2)
     {
+        ai::botdiag::TraceBehavior(ai, "rpg_drop", "beyond reaction range");
         AI_VALUE(std::set<ObjectGuid>&, "ignore rpg target").insert(AI_VALUE(GuidPosition, "rpg target"));
 
         RESET_AI_VALUE(GuidPosition, "rpg target");
@@ -92,6 +97,7 @@ bool MoveToRpgTargetAction::Execute(Event& event)
 
     if (guidP.IsGameObject() && guidP.sqDistance2d(bot) < INTERACTION_DISTANCE * INTERACTION_DISTANCE && guidP.distance(bot) > INTERACTION_DISTANCE * 1.5 && !urand(0, 5))
     {
+        ai::botdiag::TraceBehavior(ai, "rpg_drop", "object height separation");
         AI_VALUE(std::set<ObjectGuid>&, "ignore rpg target").insert(AI_VALUE(GuidPosition, "rpg target"));
 
         RESET_AI_VALUE(GuidPosition, "rpg target");
@@ -105,6 +111,7 @@ bool MoveToRpgTargetAction::Execute(Event& event)
 
     if (!urand(0, 50))
     {
+        ai::botdiag::TraceBehavior(ai, "rpg_drop", "native random abandonment");
         AI_VALUE(std::set<ObjectGuid>&, "ignore rpg target").insert(AI_VALUE(GuidPosition, "rpg target"));
 
         RESET_AI_VALUE(GuidPosition, "rpg target");
@@ -165,6 +172,9 @@ bool MoveToRpgTargetAction::Execute(Event& event)
         {
             ai->TellDebug(GetMaster(), "Can not path to desired location around " + chat->formatWorldobject(guidP.GetWorldObject(bot->GetInstanceId())) + " trying again later.", "debug move");
 
+            ai::botdiag::TraceBehavior(ai, "rpg_drop", "no corrected navigation point");
+            AI_VALUE(std::set<ObjectGuid>&, "ignore rpg target").insert(guidP);
+            RESET_AI_VALUE(GuidPosition, "rpg target");
             return false;
         }
     }
@@ -177,7 +187,8 @@ bool MoveToRpgTargetAction::Execute(Event& event)
         // The pinned core does not expose waypoint pause state; leave the
         // creature's native movement generator untouched.
     }
-        couldMove = MoveTo(mapId, x, y, z, false, false);
+        couldMove = MoveTo(movePos.getMapId(), movePos.getX(), movePos.getY(), movePos.getZ(), false, false);
+    ai::botdiag::TraceBehavior(ai, "rpg_move", couldMove ? "accepted" : "rejected");
 
     if (!couldMove && movePos.distance(bot) > INTERACTION_DISTANCE)
     {
@@ -232,6 +243,7 @@ bool MoveToRpgTargetAction::isUseful()
         {
             ai->TellPlayerNoFacing(GetMaster(), "Target could not be found. Drop rpg target");
         }
+        return false;
     }
 
     if(MEM_AI_VALUE(WorldPosition, "current position")->LastChangeDelay() < 60)

@@ -10,6 +10,8 @@ namespace BotCommands {
 // (no movement logic here).
 bool HandleChatCommand(ChatHandler* handler, char const* args);
 bool HandleAuctionCommand(ChatHandler* handler, char const* args);
+bool HandleRandomCommand(ChatHandler* handler, char const* args);
+bool HandlePerformanceCommand(ChatHandler* handler, char const* args);
 
 // Helper for core Chat.cpp hook — checks if text starts with "bot" and dispatches.
 bool TryHandleBotCommand(ChatHandler* handler, char const* text);

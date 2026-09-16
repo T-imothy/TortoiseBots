@@ -8,6 +8,7 @@ namespace ai
     class GiveItemAction : public Action
     {
     public:
+        bool RequiresWorldOwner() const override { return true; }
         GiveItemAction(PlayerbotAI* ai, std::string name, std::string item) : Action(ai, name), item(item) {}
         virtual bool Execute(Event& event) override;
         virtual bool isUseful() override { return GetTarget() && AI_VALUE2(uint8, "mana", "self target") > sPlayerbotAIConfig.lowMana; }

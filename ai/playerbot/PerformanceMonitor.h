@@ -6,6 +6,7 @@
 #include "PlayerbotAIBase.h"
 
 #include <mutex>
+#include <string_view>
 #include <chrono>
 #include <ctime>
 
@@ -13,7 +14,7 @@ typedef std::vector<std::string> PerformanceStack;
 
 struct PerformanceData
 {
-    uint32 minTime, maxTime, totalTime, count;
+    uint64 minTime = 0, maxTime = 0, totalTime = 0, count = 0;
     std::mutex lock;
 };
 
@@ -29,7 +30,7 @@ enum PerformanceMetric
 class PerformanceMonitorOperation
 {
 public:
-    PerformanceMonitorOperation(PerformanceData& data, std::string name, PerformanceStack* stack);
+    PerformanceMonitorOperation(PerformanceData& data, std::string_view name, PerformanceStack* stack);
     ~PerformanceMonitorOperation();
 
 private:
@@ -77,15 +78,15 @@ class PerformanceMonitor
         }
 
     public:
-        std::unique_ptr<PerformanceMonitorOperation> start(PerformanceMetric metric, std::string name, PerformanceStack* stack = nullptr, uint32 mapId = 0, uint32 instanceId = 0);
-        std::unique_ptr<PerformanceMonitorOperation> start(PerformanceMetric metric, std::string name, PlayerbotAI* ai);
+        std::unique_ptr<PerformanceMonitorOperation> start(PerformanceMetric metric, std::string_view name, PerformanceStack* stack = nullptr, uint32 mapId = 0, uint32 instanceId = 0);
+        std::unique_ptr<PerformanceMonitorOperation> start(PerformanceMetric metric, std::string_view name, PlayerbotAI* ai);
         void PrintStats(bool perTick = false,  bool fullStack = false, bool showMap = false);
         void Reset();
         void Init(uint32 mapId, uint32 instanceId);
     private:
         performanceMetricMap data;
         performanceMapMap mapsData;
-        //std::mutex lock;
+        std::mutex lock; // Registry structure only; entries have their own counter lock.
 };
 } // namespace bot_perf
 

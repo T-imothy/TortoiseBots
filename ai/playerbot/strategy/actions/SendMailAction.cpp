@@ -1,6 +1,7 @@
 
 #include "Mail/Mail.h"
 #include "playerbot/playerbot.h"
+#include "runtime/BotWorldActions.h"
 #include "SendMailAction.h"
 
 #include "playerbot/PlayerbotAIConfig.h"
@@ -10,6 +11,9 @@ using namespace ai;
 
 bool SendMailAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
+
     Player* requester = event.GetOwner() ? event.GetOwner() : GetMaster();
     uint32 account = sObjectMgr.GetPlayerAccountIdByGUID(bot->getObjectGuid());
     bool randomBot = sPlayerbotAIConfig.IsInRandomAccountList(account);
@@ -104,11 +108,6 @@ bool SendMailAction::Execute(Event& event)
             }
 
             ItemPrototype const *proto = item->GetProto();
-            bot->MoveItemFromInventory(item->GetBagSlot(), item->GetSlot(), true);
-            item->DeleteFromInventoryDB();
-            item->SetOwnerGuid(receiver->getObjectGuid());
-            item->SaveToDB();
-            draft.AddItem(item);
             if (randomBot)
             {
                 uint32 price = item->GetCount() * ItemUsageValue::GetBotSellPrice(proto, bot);
@@ -121,6 +120,12 @@ bool SendMailAction::Execute(Event& event)
                 }
                 draft.SetCOD(price);
             }
+
+            bot->MoveItemFromInventory(item->GetBagSlot(), item->GetSlot(), true);
+            item->DeleteFromInventoryDB();
+            item->SetOwnerGuid(receiver->getObjectGuid());
+            item->SaveToDB();
+            draft.AddItem(item);
             draft.SendMailTo(MailReceiver(receiver), MailSender(bot));
 
             std::ostringstream out; out << "Sent mail to " << receiver->GetName();

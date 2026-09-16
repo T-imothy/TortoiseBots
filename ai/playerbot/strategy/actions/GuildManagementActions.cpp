@@ -1,5 +1,6 @@
 
 #include "playerbot/playerbot.h"
+#include "runtime/BotWorldActions.h"
 #include "GuildManagementActions.h"
 #include "playerbot/ServerFacade.h"
 #include "runtime/BotActivityLease.h"
@@ -53,6 +54,9 @@ Player* GuidManageAction::GetPlayer(Event event)
 
 bool GuidManageAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
+
     Player* player = GetPlayer(event);
 
     if (!player || !PlayerIsValid(player) || player == bot)
@@ -67,10 +71,17 @@ bool GuidManageAction::Execute(Event& event)
 
 bool GuildManageNearbyAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
+
     uint32 found = 0;
 
     Guild* guild = sGuildMgr.GetGuildById(bot->GetGuildId());
+    if (!guild)
+        return false;
     MemberSlot* botMember = guild->GetMemberSlot(bot->getObjectGuid());
+    if (!botMember)
+        return false;
 
     std::list<ObjectGuid> nearGuids = ai->GetAiObjectContext()->GetValue<std::list<ObjectGuid> >("nearest friendly players")->Get();
     for (auto& guid : nearGuids)
@@ -86,7 +97,11 @@ bool GuildManageNearbyAction::Execute(Event& event)
 
         if(player->GetGuildId()) //Promote or demote nearby members based on chance.
         {
+            if (player->GetGuildId() != bot->GetGuildId())
+                continue;
             MemberSlot* member = guild->GetMemberSlot(player->getObjectGuid());
+            if (!member)
+                continue;
             uint32 dCount = AI_VALUE(uint32, "death count");
 
             if (!urand(0, 30) && dCount < 2 && guild->HasRankRight(botMember->RankId, GR_RIGHT_PROMOTE) && bot->GetRank() + 1 < player->GetRank())
@@ -238,13 +253,20 @@ bool GuildManageNearbyAction::isUseful()
         return false;
 
     Guild* guild = sGuildMgr.GetGuildById(bot->GetGuildId());
+    if (!guild)
+        return false;
     MemberSlot* botMember = guild->GetMemberSlot(bot->getObjectGuid());
+    if (!botMember)
+        return false;
 
     return  guild->HasRankRight(botMember->RankId, GR_RIGHT_DEMOTE) || guild->HasRankRight(botMember->RankId, GR_RIGHT_PROMOTE) || guild->HasRankRight(botMember->RankId, GR_RIGHT_INVITE);
 }
 
 bool GuildLeaveAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
+
     Player* requester = event.GetOwner() ? event.GetOwner() : GetMaster();
     Player* owner = event.GetOwner();
     if (owner && !ai->GetSecurity()->CheckLevelFor(PlayerbotSecurityLevel::PLAYERBOT_SECURITY_GUILD, false, owner, true))
@@ -254,6 +276,9 @@ bool GuildLeaveAction::Execute(Event& event)
     }
 
     Guild* guild = sGuildMgr.GetGuildById(bot->GetGuildId());
+
+    if (!guild)
+        return false;
 
     if (guild->GetMemberSize() > sPlayerbotAIConfig.guildMaxBotLimit)
     {
@@ -266,9 +291,17 @@ bool GuildLeaveAction::Execute(Event& event)
         );
     }
 
-    sPlayerbotAIConfig.logEvent(ai, "GuildLeaveAction", guild->GetName(), std::to_string(guild->GetMemberSize()));
+    // The native leave may reject a leader or destroy a last-member guild.
+    // Snapshot logging data before dispatch; never dereference guild afterward.
+    std::string const guildName = guild->GetName();
+    std::string const guildSize = std::to_string(guild->GetMemberSize());
 
     WorldPacket packet;
     bot->GetSession()->HandleGuildLeaveOpcode(packet);
+    if (bot->GetGuildId())
+        return false;
+    sPlayerbotAIConfig.logEvent(ai, "GuildLeaveAction", guildName, guildSize);
     return true;
 }
+
+// End native guild actions.

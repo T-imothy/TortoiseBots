@@ -71,6 +71,9 @@ bool BroadcastHelper::BroadcastTest(
 */
 bool BroadcastHelper::BroadcastToChannelWithGlobalChance(PlayerbotAI* ai, std::string message, std::list<std::pair<ToChannel, uint32>> toChannels)
 {
+    if (!sPlayerbotAIConfig.enableBroadcasts)
+        return false;
+
     if (message.empty())
     {
         return false;

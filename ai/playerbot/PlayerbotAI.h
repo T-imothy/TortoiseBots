@@ -1,5 +1,6 @@
 #pragma once
 #include "PlayerbotAIBase.h"
+#include "MapWork.h"
 #include "strategy/AiObjectContext.h"
 #include "strategy/ReactionEngine.h"
 #include "strategy/ExternalEventHelper.h"
@@ -9,6 +10,8 @@
 #include "BotState.h"
 #include "PlayerTalentSpec.h"
 #include <stack>
+#include <deque>
+#include <memory>
 #include "strategy/IterateItemsMask.h"
 #include "../../runtime/BotManager.h"
 
@@ -58,32 +61,6 @@ public:
         char* source = (char*)str.c_str();
         return ExtractSpellIdFromLink(&source);
     }
-};
-
-class ChannelAcces
-{
-public:
-    struct PlayerInfo
-    {
-        ObjectGuid player;
-        uint8 flags;
-    };
-
-    typedef std::map<ObjectGuid, PlayerInfo> PlayerList;
-
-    bool IsOn(ObjectGuid who) const { return m_players.find(who) != m_players.end(); }
-    std::string                 m_name;
-    std::string                 m_password;
-    ObjectGuid                  m_ownerGuid;
-    PlayerList                  m_players;
-    GuidSet                     m_banned;
-    const ChatChannelsEntry* m_entry = nullptr;
-    bool                        m_announcements = false;
-    bool                        m_moderation = false;
-    uint8                       m_flags = 0x00;
-    // Custom features:
-    bool                        m_static = false;
-    bool                        m_realmzone = false;
 };
 
 namespace ai
@@ -296,6 +273,11 @@ public:
     void AddHandler(uint16 opcode, std::string handler, bool shouldDelay = false);
     void Handle(ExternalEventHelper &helper);
     void AddPacket(const WorldPacket& packet);
+    bool HasPackets()
+    {
+        std::lock_guard<std::mutex> lock(m_botPacketMutex);
+        return !queue.empty();
+    }
 
 private:
     std::map<uint16, std::string> handlers;
@@ -309,24 +291,25 @@ private:
 class ChatCommandHolder
 {
 public:
-    ChatCommandHolder(std::string command, Player* owner = NULL, uint32 type = CHAT_MSG_WHISPER, time_t time = 0) : command(command), owner(owner), type(type), time(time) {}
+    ChatCommandHolder(std::string command, Player* owner = NULL, uint32 type = CHAT_MSG_WHISPER, time_t time = 0) : command(command), requester("chat command", std::string(), owner), type(type), time(time) {}
     ChatCommandHolder(ChatCommandHolder const& other)
     {
         this->command = other.command;
-        this->owner = other.owner;
+        this->requester = other.requester;
         this->type = other.type;
         this->time = other.time;
     }
 
 public:
     std::string GetCommand() { return command; }
-    Player* GetOwner() { return owner; }
+    Player* GetOwner() { return requester.GetOwner(); }
+    bool HasExpiredOwner() const { return requester.HasExpiredOwner(); }
     uint32 GetType() { return type; }
     time_t GetTime() { return time; }
 
 private:
     std::string command;
-    Player* owner;
+    Event requester;
     uint32 type;
     time_t time;
 };
@@ -361,6 +344,7 @@ public:
     // single decision to use the full activity path without changing the
     // normal autonomous/random-bot throttle.
     void DoNextAction(bool minimal = false, bool forceActivity = false);
+    void ReconcileMasterAndPosture();
     bool CanDoSpecificAction(const std::string& name, bool isUseful = true, bool isPossible = true);
     virtual bool DoSpecificAction(const std::string& name, ai::Event event = ai::Event(), bool silent = false);
     void ChangeStrategy(const std::string& name, BotState type);
@@ -372,6 +356,7 @@ public:
     template<class T>
     T* GetStrategy(const std::string& name, BotState type);
     BotState GetState() { return currentState; };
+    Engine const* GetEngine(BotState type) const { return engines[(uint8)type]; }
     void ResetStrategies(bool autoLoad = true);
     void ReInitCurrentEngine();
     void Reset(bool full = false);
@@ -513,11 +498,9 @@ public:
     std::list<Unit*> GetAllHostileUnitsAroundWO(WorldObject* wo, float distanceAround);
     std::list<Unit*> GetAllHostileNPCNonPetUnitsAroundWO(WorldObject* wo, float distanceAround);
 
-    static void SendDelayedPacket(WorldSession* session, std::future<std::vector<std::pair<WorldPacket, uint32>>> futurePacket);
-    // Drain packets produced by optional asynchronous work on the world
-    // thread. The queue is keyed by durable bot GUID, never by a raw session
-    // captured by a worker thread.
-    static void ProcessDelayedPackets();
+    void SendDelayedPacket(std::future<std::vector<std::pair<WorldPacket, uint32>>> futurePacket);
+    // Owner-only drain; a worker can publish only to this AI lifetime's mailbox.
+    void ProcessDelayedPackets();
  public:
     std::vector<Bag*> GetEquippedAnyBags();
     std::vector<Bag*> GetEquippedQuivers();
@@ -617,12 +600,20 @@ public:
     // the ack tick skips AI updates (short same-map teleports included).
     uint64_t GetTransitionGeneration() const { return transitionGeneration; }
     //Get the group leader or the master of the bot.
-    Player* GetGroupMaster() { return bot->InBattleGround() ? master : bot->GetGroup() ? (sObjectMgr.GetPlayer(bot->GetGroup()->GetLeaderGuid()) ? sObjectMgr.GetPlayer(bot->GetGroup()->GetLeaderGuid()) : master) : master; }
+    Player* GetGroupMaster()
+    {
+        Player* currentMaster = GetLiveMaster();
+        if (!bot->InBattleGround())
+            if (Group* group = bot->GetGroup())
+                if (Player* leader = sObjectMgr.GetPlayer(group->GetLeaderGuid()))
+                    return leader;
+        return currentMaster;
+    }
 
     bool IsGroupLeader() { return bot->GetGroup() && bot->GetGroup()->GetLeaderGuid() == bot->GetObjectGuid(); }
 
     //Check if player is safe to use.
-    static bool IsSafe(Player* player, WorldObject* obj) {return obj && obj->GetMapId() == player->GetMapId() && obj->GetInstanceId() == player->GetInstanceId() && (!obj->IsPlayer() || !((Player*)obj)->IsBeingTeleported() || !((Player*)obj)->GetSession()->GetPlayer()); }
+    static bool IsSafe(Player* player, WorldObject* obj);
     bool IsSafe(WorldObject* obj) { return IsSafe(bot, obj); }
     bool IsSafe(Player* player) { return IsSafe(bot, player); }
 
@@ -641,6 +632,7 @@ public:
 
     ActivePiorityType GetPriorityType();
     std::pair<uint32,uint32> GetPriorityBracket(ActivePiorityType type);
+    bool CachedActivity(ActivityType type) const { return allowActive[type]; }
     bool AllowActive(ActivityType activityType);
     bool AllowActivity(ActivityType activityType = ALL_ACTIVITY, bool checkNow = false);
 
@@ -674,12 +666,13 @@ public:
     PlayerbotSecurity* GetSecurity() { return &security; }
 
     WorldPosition GetJumpDestination() { return jumpDestination; }
-    void SetJumpDestination(const WorldPosition& pos) { jumpDestination = pos; }
+    void SetJumpDestination(const WorldPosition& pos);
+    void UpdateJumpMovement();
     void ResetJumpDestination() { jumpDestination = WorldPosition(); }
 
     bool IsJumping() { return jumpTime; }
     void SetFallAfterJump() { fallAfterJump = true; }
-    void SetJumpTime(uint32 time) { jumpTime = time; }
+    void SetJumpTime(uint32 time) { jumpTime = time ? time : 1; }
     bool CanMove();
     void StopMoving();
     bool IsInRealGuild();
@@ -694,6 +687,17 @@ public:
     void OnCombatEnded();
     void OnDeath();
     void OnResurrected();
+
+    struct LastKillerInfo
+    {
+        std::string name;
+        uint32 level = 0;
+        bool isEnvironment = false;
+        uint32 time = 0;
+    };
+    void SetLastKiller(Unit* killer);
+    const LastKillerInfo& GetLastKiller() const { return lastKiller_; }
+    void ClearLastKiller() { lastKiller_ = LastKillerInfo(); }
 
     void SetActionDuration(const Action* action);
     void SetActionDuration(uint32 duration);
@@ -739,6 +743,34 @@ public:
 #endif
 
 private:
+    // Packet producers only enqueue. The AI owner drains reactions before its
+    // decision delay, so spell/movement notifications remain responsive.
+    void ProcessPendingBotPackets(bool worldControlOnly = false);
+    bool EnterWorldControl(std::weak_ptr<int>& pending, std::string const& name,
+        void (PlayerbotAI::*drain)());
+    void ProcessWorldControl();
+    void CancelLogout(bool forReset);
+    std::weak_ptr<int> pendingLogoutCancellation[2];
+    std::weak_ptr<int> pendingWorldCommands;
+    std::weak_ptr<int> pendingWorldControl;
+    void ProcessBotOutgoingPacket(const WorldPacket& packet);
+    struct DelayedPacketMailbox
+    {
+        std::mutex mutex;
+        std::deque<std::unique_ptr<WorldPacket>> packets;
+    };
+    std::shared_ptr<DelayedPacketMailbox> delayedPacketMailbox = std::make_shared<DelayedPacketMailbox>();
+
+    struct PendingBotPacket
+    {
+        std::unique_ptr<WorldPacket> packet;
+        uint64 mapGeneration;
+        bool mapBound;
+    };
+    std::deque<PendingBotPacket> pendingBotPackets;
+    std::mutex pendingBotPacketsMutex;
+    std::weak_ptr<int> pendingWorldPacketDrain;
+
     bool UpdateAIReaction(uint32 elapsed, bool minimal, bool isStunned);
     void UpdateFaceTarget(uint32 elapsed, bool minimal);
 
@@ -771,11 +803,13 @@ protected:
     bool allowActive[MAX_ACTIVITY_TYPE];
     time_t allowActiveCheckTimer[MAX_ACTIVITY_TYPE];
     bool explicitActivityOverride = false;
+    std::weak_ptr<int> pendingMasterReconciliation;
     bool inCombat = false;
     bool isMoving = false;
     bool isWaiting = false;
     BotCheatMask cheatMask = BotCheatMask::none;
     WorldPosition jumpDestination;
+    MapWorkStamp jumpStamp{};
     uint32 jumpTime;
     bool fallAfterJump;
     // Issue #84 (P2): bumped by HandleTeleportAck, consumed by engines.
@@ -788,6 +822,7 @@ protected:
     bool m_recordIncommingMessages = false;
     std::vector<std::string> m_recordedMessages;
     ai::Event lastEvent;
+    LastKillerInfo lastKiller_;
 
 public:
     void RecordMessages(bool record, bool incomming = false) { m_recordMessages = record; m_recordIncommingMessages = incomming; if (!record) m_recordedMessages.clear(); }

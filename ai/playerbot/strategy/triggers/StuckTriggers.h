@@ -28,7 +28,7 @@ namespace ai
             if (ai->HasActivePlayerMaster())
                 return false;
 
-            if (ai->GetGroupMaster() && PlayerbotAIStorage::Instance().GetAI(!ai->GetGroupMaster()))
+            if (ai->GetGroupMaster() && !PlayerbotAIStorage::Instance().GetAI(ai->GetGroupMaster()))
                 return false;
 
             if (!ai->AllowActivity(ALL_ACTIVITY))
@@ -71,7 +71,7 @@ namespace ai
             if (ai->HasActivePlayerMaster())
                 return false;
 
-            if (ai->GetGroupMaster() && PlayerbotAIStorage::Instance().GetAI(!ai->GetGroupMaster()))
+            if (ai->GetGroupMaster() && !PlayerbotAIStorage::Instance().GetAI(ai->GetGroupMaster()))
                 return false;
 
             if (!ai->AllowActivity(ALL_ACTIVITY))
@@ -150,7 +150,7 @@ namespace ai
             if (ai->HasActivePlayerMaster())
                 return false;
 
-            if (ai->GetGroupMaster() && PlayerbotAIStorage::Instance().GetAI(!ai->GetGroupMaster()))
+            if (ai->GetGroupMaster() && !PlayerbotAIStorage::Instance().GetAI(ai->GetGroupMaster()))
                 return false;
 
             if (!ai->AllowActivity(ALL_ACTIVITY))
@@ -191,7 +191,7 @@ namespace ai
             if (ai->HasActivePlayerMaster())
                 return false;
 
-            if (ai->GetGroupMaster() && PlayerbotAIStorage::Instance().GetAI(!ai->GetGroupMaster()))
+            if (ai->GetGroupMaster() && !PlayerbotAIStorage::Instance().GetAI(ai->GetGroupMaster()))
                 return false;
 
             if (!ai->AllowActivity(ALL_ACTIVITY))

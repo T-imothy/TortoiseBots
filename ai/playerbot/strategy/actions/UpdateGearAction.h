@@ -9,6 +9,7 @@ namespace ai
     class UpdateGearAction : public Action
     {
     public:
+        bool RequiresWorldOwner() const override { return true; }
         UpdateGearAction(PlayerbotAI* ai);
         virtual bool Execute(Event& event) override;
         virtual bool isUseful() override;

@@ -6,6 +6,7 @@
 #include <mutex>
 #include <string>
 #include <vector>
+#include <functional>
 
 class Player;
 class Unit;
@@ -73,6 +74,10 @@ public:
                         std::string const& targetName = "",
                         std::string const& strategy = "");
 
+    // turtle: let another module (e.g. mod-turtlebots residents) contribute its
+    // own Player* roster to every telemetry cycle. Called on the world thread.
+    void SetExternalRosterProvider(std::function<void(std::vector<Player*>&)> provider);
+
 private:
     ObservabilityEmitter();
     ~ObservabilityEmitter();
@@ -104,6 +109,8 @@ private:
     // Guards socket teardown against a concurrent sender; emission and state
     // mutation stay on the world thread.
     mutable std::mutex m_socketMutex;
+    // Lock order: state -> socket. Nested anomaly emission is intentional.
+    mutable std::recursive_mutex m_stateMutex;
 
     uint32 m_snapshotTimerMs;
     // Epoch identifying this server process. The daemon outlives server
@@ -128,6 +135,9 @@ private:
         uint32 lastUnreachableReportMs = 0;
     };
     std::map<uint32, BotTrackState> m_botTracking;
+
+    // Optional roster contributor from another module (world thread only).
+    std::function<void(std::vector<Player*>&)> m_externalRosterProvider;
 
     struct ActionFailureRecord
     {

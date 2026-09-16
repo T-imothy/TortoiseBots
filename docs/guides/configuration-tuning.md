@@ -138,3 +138,121 @@ action cannot be preempted, so this is a soft time bound. Cheap elapsed accounti
 still scans the pool so deferred bots retain strategy/randomization timers.
 Admission retains its separate existing limit. These limits do not certify
 6,000 live bots or complete the parallel AI scheduling migration.
+
+
+## ManTech population admission and durable targets
+
+`AiPlayerbot.LoginDbQueueLimit` defaults to 256. Random admission and automatic
+character creation stop admitting work when either the character or login DB's
+query or callback queue reaches the limit. Zero explicitly disables this ceiling;
+it does not change explicit player-owned bot commands.
+
+Population bounds are reconciled on the service cadence, including a zero target.
+The selected `bot_count` is stored through the persistent facade. Without automatic
+creation, the current candidate count caps admissions without overwriting the
+desired persisted target. Surplus removal shares bounded cadence work and preserves
+owned, pinned, busy, queued/offered LFT, grouped, combat, BG, taxi, transport,
+dungeon and teleporting bots. Pending additions count toward admission totals.
+This bounds this service's work; it is not a measured 6000-bot performance claim.
+
+
+## Background execution retry preservation
+
+The existing `FailedActionRetryBase`, `FailedActionRetryMax`,
+`FailedActionCacheTtl` and `FailedActionCacheMaxEntries` settings retain their
+bounds and defaults (250 ms, 2,000 ms, 30 seconds and 64 entries). Zero base or
+maximum disables retry memory. Only failed executions of autonomous non-combat
+background actions back off. Usefulness, prerequisites and possibility are
+evaluated normally, and alternative actions remain eligible. Impossible work
+does not extend a retry deadline. Owner commands, owned bots, combat, reactions
+and high-priority actions bypass the retry gate. Physical/resource changes,
+master/control changes and native map-work generation changes clear stale
+failures. The current power type is used, including rage and energy.
+
+
+## Preserved movement diagnostics and activity control
+
+`AiPlayerbot.BehaviorTrace` defaults off. Its map, X/Y and radius options select
+the initial observation area. The existing bounded sampler tracks at most 12 bots,
+emits at most 8,000 records over ten minutes and reserves periodic movement samples.
+It observes journey/action/RPG/taxi outcomes without changing movement or eligibility.
+Restart to begin another sample. Thorn diagnostics use the existing battleground
+diagnostic admission and interval; they remain independent of general action logs.
+
+Random-population maintenance restores the existing PID activity policy, with
+P=0.05, I=0.001 and D=0.05. `DiffWithPlayer` and `DiffEmpty` supply its desired
+world-update time. The controller uses elapsed seconds and publishes 0..100 percent
+to the existing priority brackets. Human ownership, party and other critical
+activity exemptions remain in `PlayerbotAI`. It does not change core tick rates.
+`rndbot pid <p> <i> <d>` updates finite coefficients and resets controller history.
+`rndbot stats` reports the current percentage. Tuning lasts until process restart.
+
+AiPlayerbot.InstantRandomize (1) initializes eligible, uninitialized random
+bots in the bounded maintenance pass, using AiPlayerbot.RandomBotMinLevel (1),
+RandomBotMaxLevel, RandomBotMaxLevelChance (0.15), DisableRandomLevels and the
+existing SyncLevelWithPlayers settings. A durable per-character level marker
+prevents re-randomizing on later logins. This work is not done in the login
+callback; at large populations it can take additional time to finish. Bounds
+are clamped to the core's allowed levels. AiPlayerbot.RandomBotTeleportDistance
+(1000 yards) limits explicit local grind relocation; it does not enable
+automatic teleporting.
+
+AiPlayerbot.DeleteRandomBotAccounts (0) is a destructive one-start rebuild
+switch. When enabled, startup admits no random bots and the service deletes
+one account per cadence through the native AccountMgr. It accepts only the
+configured prefix followed by exactly six ASCII digits, aborting if another
+name matches the prefix. Once the old account and character ownership has
+disappeared from both databases, normal auto-creation may resume. Restore the
+switch to 0 before the next restart or the replacement cohort will also be
+deleted. It is disabled in the local operator configuration; adding the line
+alone does not perform a reset.
+
+AiPlayerbot.EnableActionLog controls the engine's per-action execution messages
+as well as the existing detailed action logging. Its default is off. Bounded
+BehaviorTrace remains a separate temporary diagnostic and does not require
+unbounded action logs.
+
+The native world-action queue has fixed bounds of 1024 pending requests, 8 per bot,
+64 per tick and a 4 ms soft drain budget with minimum one-request progress. These
+are internal bounds, not new configuration settings. Map execution remains gated;
+the current world-owned AI loop executes its actions synchronously.
+
+---
+
+## 6. Diagnostic Logging
+
+The native module layer (bot lifecycle, random-bot, Auction House, battleground queue, and LFT services — everything under `host/` and `runtime/`) has its own verbosity setting, independent of the core server's own `LogLevel`. This lets you trace what the module is doing without turning on the engine's full debug output, and vice versa.
+
+```ini
+[TortoiseBotsConf]
+TortoiseBots.LogLevel = 2
+```
+
+| Level | Name | Shows |
+| :---: | :--- | :--- |
+| `0` | Minimal | Errors only. |
+| `1` | Basic | One-off startup, shutdown, and diagnostic test results (e.g. `PendingAddRemoveTest`, `AutoTest`). |
+| `2` | Detail (default) | Per-bot state transitions: session start/stop, add/remove, AH postings, BG queue entries. |
+| `3` | Debug | Per-tick and per-packet traces. High volume — intended for short diagnostic sessions, not left on. |
+
+Errors (`sLog.outError`) are always written regardless of this setting. The level is re-read on `.reload config`, so it can be raised or lowered without a server restart.
+
+This setting is separate from the strategy AI's own action trace, which stays gated behind the `debug`/`debug action` bot strategies (`.bot strategy +debug`) rather than a server-wide config key.
+
+
+## September 13 local population correction
+
+The native service honors RandomBotUpdateInterval down to 100 ms. Login count
+is per interval: 6 at 100 ms permits up to 60 admissions/second, subject to the
+existing LoginDbQueueLimit. RandomBotsMaxCreatesPerInterval (10) and
+RandomBotCreationBudgetMs (5) bound native character creation per interval.
+An individual native creation or initialization cannot be preempted.
+InstantRandomize initializes the requested 1–60 range through the existing
+factory and then requests validated level-appropriate native relocation.
+DeleteRandomBotAccounts force-deletes only the selected generated accounts'
+characters through native Player deletion before native account deletion.
+It refuses an account with an active network session. The local switch is armed
+for the user's next manual startup; reset it to zero after completion.
+The local runtime enables existing continent partitioning and uses activity
+priorities with botActiveAlone=10, matching the requested CMaNGOS activity model.
+Build/deployment only was requested; no new population/runtime acceptance run.

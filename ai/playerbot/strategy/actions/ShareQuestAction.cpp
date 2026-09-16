@@ -1,3 +1,4 @@
+#include "runtime/BotWorldActions.h"
 
 #include "playerbot/playerbot.h"
 #include "ShareQuestAction.h"
@@ -6,6 +7,9 @@ using namespace ai;
 
 bool ShareQuestAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
+
     Player* requester = event.GetOwner() ? event.GetOwner() : GetMaster();
     std::string link = event.GetParam();
 
@@ -40,6 +44,9 @@ bool ShareQuestAction::Execute(Event& event)
 
 bool AutoShareQuestAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
+
     Player* requester = event.GetOwner() ? event.GetOwner() : GetMaster();
     bool shared = false;
 

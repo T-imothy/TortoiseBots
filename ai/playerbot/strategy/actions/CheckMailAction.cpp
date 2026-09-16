@@ -1,105 +1,54 @@
-
 #include "playerbot/playerbot.h"
 #include "CheckMailAction.h"
+#include "MailAction.h"
 #include "Mail/Mail.h"
 #include "MapNodes/MasterPlayer.h"
-
+#include "runtime/BotWorldActions.h"
 #include "playerbot/PlayerbotAIConfig.h"
 using namespace ai;
 
 bool CheckMailAction::Execute(Event& event)
 {
-    WorldPacket p;
-    bot->GetSession()->HandleQueryNextMailTime(p);
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
+    if (!isUseful()) return false;
+    ObjectGuid const mailbox = MailProcessor::FindMailbox(ai);
+    if (!mailbox) return false;
 
-    MasterPlayer* master = bot->GetSession() ? bot->GetSession()->GetMasterPlayer() : nullptr;
-    if (!master)
-        return false;
-
-    std::list<uint32> ids;
-    PlayerMails mails;
-
-    //Fetch mails first and then loop over them to prevent needing to check mails sent to self.
-    for (PlayerMails::iterator i = master->GetMailBegin(); i != master->GetMailEnd(); ++i)
+    MasterPlayer* master = bot->GetSession()->GetMasterPlayer();
+    // Native return deletes the Mail object and can append a new self-addressed
+    // message. Snapshot IDs only, then resolve before each native operation.
+    std::vector<uint32> ids;
+    for (auto i = master->GetMailBegin(); i != master->GetMailEnd(); ++i)
+        if (*i) ids.push_back((*i)->messageID);
+    bool returned = false;
+    unsigned attempts = 0;
+    for (uint32 id : ids)
     {
-        mails.push_back(*i);
-    }
-
-    for (auto & mail : mails)
-    {
-        if (!mail || mail->state == MAIL_STATE_DELETED)
+        Mail* mail = master->GetMail(id);
+        if (!mail || mail->state == MAIL_STATE_DELETED || mail->deliver_time > time(nullptr) ||
+            mail->stationery == MAIL_STATIONERY_AUCTION || mail->messageType != MAIL_NORMAL ||
+            mail->items.empty() || mail->subject.find("Item(s) you asked for") != std::string::npos)
             continue;
-
-        // Skip auction mail - auction payouts and won items must be collected via MailAction, never deleted!
-        if (mail->stationery == MAIL_STATIONERY_AUCTION || mail->messageType != MAIL_NORMAL)
-            continue;
-
         Player* owner = sObjectMgr.GetPlayer(ObjectGuid(HIGHGUID_PLAYER, mail->sender));
-        if (!owner)
+        // Preserve the existing online-human-sender policy. Native return drops
+        // mail to hardcore senders, so automatic processing must retain it.
+        if (!owner || owner->IsHardcore() || sPlayerbotAIConfig.IsInRandomAccountList(
+            sObjectMgr.GetPlayerAccountIdByGUID(owner->GetObjectGuid())))
             continue;
-
-        uint32 account = sObjectMgr.GetPlayerAccountIdByGUID(owner->getObjectGuid());
-        if (sPlayerbotAIConfig.IsInRandomAccountList(account))
-            continue;
-
-        ProcessMail(mail, owner);
-        ids.push_back(mail->messageID);
-        mail->state = MAIL_STATE_DELETED;
+        WorldPacket packet(CMSG_MAIL_RETURN_TO_SENDER);
+        packet << mailbox << id;
+        bot->GetSession()->HandleMailReturnToSender(packet);
+        returned = !master->GetMail(id) || returned;
+        if (++attempts == 8) break;
     }
-
-    for (std::list<uint32>::iterator i = ids.begin(); i != ids.end(); ++i)
-    {
-        uint32 id = *i;
-        CharacterDatabase.PExecute("DELETE FROM mail WHERE id = '%u'", id);
-        CharacterDatabase.PExecute("DELETE FROM mail_items WHERE mail_id = '%u'", id);
-        master->RemoveMail(id);
-    }
-
-    return true;
+    return returned;
 }
 
 bool CheckMailAction::isUseful()
 {
     MasterPlayer* master = bot->GetSession() ? bot->GetSession()->GetMasterPlayer() : nullptr;
-    if (!master || ai->GetMaster() || !master->GetMailSize() || bot->InBattleGround())
-        return false;
-
-    return true;
+    return master && !ai->GetMaster() && master->GetMailSize() && bot->IsAlive() &&
+        bot->IsInWorld() && !bot->IsBeingTeleported() && !bot->IsInCombat() && !bot->InBattleGround();
 }
-
-
-void CheckMailAction::ProcessMail(Mail* mail, Player* owner)
-{
-    MasterPlayer* master = bot->GetSession() ? bot->GetSession()->GetMasterPlayer() : nullptr;
-    if (!master || mail->items.empty())
-    {
-        return;
-    }
-
-    if (mail->subject.find("Item(s) you asked for") != std::string::npos)
-        return;
-
-    if (mail->messageType != MAIL_NORMAL || mail->stationery == MAIL_STATIONERY_AUCTION)
-        return;
-
-    for (MailItemInfoVec::iterator i = mail->items.begin(); i != mail->items.end(); ++i)
-    {
-        Item *item = master->GetMItem(i->item_guid);
-        if (!item)
-            continue;
-
-        std::ostringstream body;
-        body << "Hello, " << owner->GetName() << ",\n";
-        body << "\n";
-        body << "Here are the item(s) you've sent me by mistake";
-        body << "\n";
-        body << "Thanks,\n";
-        body << bot->GetName() << "\n";
-
-        MailDraft draft("Item(s) you've sent me", body.str());
-        draft.AddItem(item);
-        master->RemoveMItem(i->item_guid);
-        draft.SendMailTo(MailReceiver(owner), MailSender(bot));
-        return;
-    }
-}
+// End native automatic mail return.

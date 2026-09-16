@@ -81,6 +81,8 @@ namespace ai
         virtual ~Action(void) {}
 
     public:
+        // Eligibility and execution for this action require the post-map world owner.
+        virtual bool RequiresWorldOwner() const { return false; }
         virtual bool Execute(Event& event) { return true; }
         virtual bool isPossible() { return true; }
         virtual bool isUseful() { return true; }

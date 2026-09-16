@@ -90,13 +90,14 @@ std::string PlayerbotTextMgr::GetBotText(std::string name)
         sLog.outError("Can't get bot text %s! No bots texts loaded!", name.c_str());
         return "";
     }
-    if (botTexts[name].empty())
+    auto const found = botTexts.find(name);
+    if (found == botTexts.end() || found->second.empty())
     {
         sLog.outDetail("Can't get bot text %s! No bots texts for this name!", name.c_str());
         return "";
     }
 
-    std::vector<BotTextEntry>& list = botTexts[name];
+    std::vector<BotTextEntry> const& list = found->second;
     BotTextEntry textEntry = list[urand(0, list.size() - 1)];
     int32 localePrio = GetLocalePriority();
     if (localePrio == -1)
@@ -127,22 +128,26 @@ std::string PlayerbotTextMgr::GetBotText(ChatReplyType replyType, std::map<std::
 {
     if (botTexts.empty())
     {
-        sLog.outError("Can't get bot text reply %u! No bots texts loaded!", replyType);
+        sLog.outDetail("Can't get bot text reply %u! No bots texts loaded!", replyType);
         return "";
     }
-    if (botTexts["reply"].empty())
+    auto const found = botTexts.find("reply");
+    if (found == botTexts.end() || found->second.empty())
     {
         sLog.outDetail("Can't get bot text reply %u! No bots texts replies!", replyType);
         return "";
     }
 
-    std::vector<BotTextEntry>& list = botTexts["reply"];
+    std::vector<BotTextEntry> const& list = found->second;
     std::vector<BotTextEntry> proper_list;
     for (auto text : list)
     {
         if (text.m_replyType == replyType)
             proper_list.push_back(text);
     }
+
+    if (proper_list.empty())
+        return "";
 
     BotTextEntry textEntry = proper_list[urand(0, proper_list.size() - 1)];
     std::string botText;
@@ -174,10 +179,11 @@ std::string PlayerbotTextMgr::GetBotText(ChatReplyType replyType, std::string na
 
 bool PlayerbotTextMgr::rollTextChance(std::string name)
 {
-    if (!botTextChance[name])
+    auto const found = botTextChance.find(name);
+    if (found == botTextChance.end() || !found->second)
         return true;
 
-    return urand(0, 100) < botTextChance[name];
+    return urand(0, 100) < found->second;
 }
 
 bool PlayerbotTextMgr::GetBotText(std::string name, std::string &text)

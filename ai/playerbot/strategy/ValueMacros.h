@@ -39,10 +39,10 @@
 #define MAI_VALUE(type, name) PlayerbotAIStorage::Instance().GetAI(master)->GetAiObjectContext()->GetValue<type>(name)->Get()
 #define MAI_VALUE2(type, name, param) PlayerbotAIStorage::Instance().GetAI(master)->GetAiObjectContext()->GetValue<type>(name, param)->Get()
 
-#define GAI_VALUE(type, name) sSharedObjectContext.GetValue<type>(name)->Get()
-#define GAI_VALUE2(type, name, param) sSharedObjectContext.GetValue<type>(name, param)->Get()
-#define SET_GAI_VALUE(type, name, value) sSharedObjectContext.GetValue<type>(name)->Set(value)
-#define SET_GAI_VALUE2(type, name, param, value) sSharedObjectContext.GetValue<type>(name, param)->Set(value)
+#define GAI_VALUE(type, name) sSharedObjectContext.ReadValue<type>(name)
+#define GAI_VALUE2(type, name, param) sSharedObjectContext.ReadValue<type>(name, param)
+#define SET_GAI_VALUE(type, name, value) sSharedObjectContext.WriteValue<type>(name, value)
+#define SET_GAI_VALUE2(type, name, param, value) sSharedObjectContext.WriteValue<type>(name, param, value)
 
 #define MEM_AI_VALUE(type, name) dynamic_cast<MemoryCalculatedValue<type>*>(context->GetUntypedValue(name))
 #define LOG_AI_VALUE(type, name) dynamic_cast<LogCalculatedValue<type>*>(context->GetUntypedValue(name))

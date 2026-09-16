@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include "BotRemovalQueue.h"
 #include <string>
 #include <unordered_map>
 #include <memory>
@@ -31,6 +32,7 @@ class Unit;
 namespace TortoiseBots {
 
 bool NormalizeHeadlessGmPresentation(::Player* bot);
+enum class RandomBotDestination { Level, LocalGrind, Rpg };
 
 enum class BotLifecycle
 {
@@ -41,6 +43,7 @@ enum class BotLifecycle
 
 struct BotRecord
 {
+    uint64_t generation = 0; // module record incarnation, not a native login token
     uint32_t accountId = 0; // character account used by the Headless login
 // pi-lens-ignore: clang:unknown_typename
     ObjectGuid characterGuid;
@@ -92,6 +95,7 @@ public:
     static BotManager& Instance();
 
     void OnWorldUpdate(uint32_t diff);
+    bool IsPacketBridgeTestEnabled() const { return m_packetTestEnabled; }
     void OnPlayerLogin(Player* player);
     void OnPlayerBeforeLogout(Player* player);
     void OnPlayerLogout(Player* player);
@@ -101,6 +105,7 @@ public:
 // pi-lens-ignore: clang:unknown_typename
     bool AddBot(uint32_t accountId, ObjectGuid guid, ObjectGuid masterGuid = ObjectGuid());
     bool AddRandomBot(uint32_t accountId, ObjectGuid guid);
+    static bool HasRandomAdmissionCapacity();
 // pi-lens-ignore: clang:unknown_typename
     bool AddBotWithMaster(uint32_t accountId, ObjectGuid guid, ObjectGuid masterGuid);
 // pi-lens-ignore: clang:unknown_typename
@@ -110,6 +115,7 @@ public:
     // point (death count reset). Fail-closed: any validation miss, non-random
     // record, master/group/BG membership, or disabled config keeps position.
     bool RelocateHopelessBot(::Player* bot);
+    bool RelocateRandomBot(::Player* bot, RandomBotDestination destination);
 
     // Durable manual ownership is separate from the transient Headless record.
     // GetOwnedCharacters includes every undeleted same-account character plus
@@ -182,6 +188,7 @@ private:
 
 
     std::unordered_map<uint32_t, BotEntry> m_bots; // key = guid counter
+    uint64_t m_recordGeneration = 0;
     // Reentrancy guard for AI-driven removal. PlayerbotAI::UpdateAIInternal can
     // request its own removal (stunned/idle logout path) while its Update is on
     // the stack inside UpdateBots. Stopping the Headless session synchronously
@@ -190,12 +197,8 @@ private:
     // guard is set, RemoveBot only marks Removing and queues the request; the
     // queue drains after the update loop leaves every AI stack.
     bool m_inBotUpdate = false;
-    struct PendingBotRemoval
-    {
-        ObjectGuid characterGuid;
-        bool save = true;
-    };
-    std::vector<PendingBotRemoval> m_pendingBotRemovals;
+    BotRemovalQueue m_pendingBotRemovals;
+    void DrainPendingBotRemovals();
     bool m_autoTestEnabled = false;
     uint32_t m_autoTestAccount = 0;
 // pi-lens-ignore: clang:unknown_typename
@@ -206,10 +209,14 @@ private:
     bool m_autoTestPassed = false;
 
     bool m_packetTestEnabled = false;
+    bool m_packetTestInjectedStun = false;
     uint32_t m_packetTestAccount = 0;
     ObjectGuid m_packetTestMasterGuid;
     ObjectGuid m_packetTestBotGuid;
     uint32_t m_packetTestTicks = 0;
     uint8_t m_packetTestStage = 0;
+    uint32_t m_packetTestGuildId = 0;
+    uint32_t m_packetTestGroupId = 0;
+    bool m_packetTestGiftCreated = false;
 };
 } // namespace TortoiseBots

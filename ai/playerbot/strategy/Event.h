@@ -2,11 +2,14 @@
 
 #include "ObjectGuid.h"
 #include "WorldPacket.h"
+#include <memory>
 
 class Player;
 
 namespace ai
 {
+    struct EventOwnerIdentity;
+
     class Event
 	{
 	public:
@@ -31,9 +34,9 @@ namespace ai
         }
         Event() {}
         Event(std::string source) : source(source) {}
-        Event(std::string source, std::string param, Player* owner = NULL) : source(source), param(param), owner(owner) {}
-        Event(std::string source, WorldPacket &packet, Player* owner = NULL) : source(source), packet(packet), owner(owner) {}
-        Event(std::string source, ObjectGuid object, Player* owner = NULL) : source(source), owner(owner) { packet << object; }
+        Event(std::string source, std::string param, Player* owner = NULL);
+        Event(std::string source, WorldPacket &packet, Player* owner = NULL);
+        Event(std::string source, ObjectGuid object, Player* owner = NULL);
         virtual ~Event() {}
 
 	public:
@@ -41,17 +44,19 @@ namespace ai
         std::string getParam() { return param; }
         WorldPacket& getPacket() { return packet; }
         ObjectGuid getObject();
-        Player* getOwner() { return owner; }
+        Player* getOwner() const;
+        bool HasExpiredOwner() const;
+        static void InvalidateOwner(Player* player);
         std::string GetParam() { return getParam(); }
         WorldPacket& GetPacket() { return getPacket(); }
         Player* GetOwner() { return getOwner(); }
-        bool operator! () const { return source.empty(); }
+        bool operator! () const { return source.empty() || HasExpiredOwner(); }
 
     protected:
         std::string source;
         std::string param;
         WorldPacket packet;
-        Player* owner = nullptr;
+        std::shared_ptr<EventOwnerIdentity> owner;
 	};
 }
 

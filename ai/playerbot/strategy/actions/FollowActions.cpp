@@ -1,3 +1,4 @@
+#include "runtime/BotWorldActions.h"
 
 #include "playerbot/playerbot.h"
 #include "FollowActions.h"
@@ -10,8 +11,17 @@
 
 using namespace ai;
 
+bool FollowAction::RequiresWorldOwner() const
+{
+    Unit* target = context->GetValue<Unit*>("follow target")->Get();
+    return target && !ai->IsSafe(target);
+}
+
 bool FollowAction::Execute(Event& event)
 {
+    if (RequiresWorldOwner())
+        if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+            return *deferred;
     bool moved = false;
     Unit* followTarget = AI_VALUE(Unit*, "follow target");
     Formation* formation = AI_VALUE(Formation*, "formation");
@@ -118,6 +128,8 @@ bool StopFollowAction::isUseful()
 
 bool FleeToMasterAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
     Player* requester = event.GetOwner() ? event.GetOwner() : GetMaster();
     Unit* fTarget = AI_VALUE(Unit*, "master target");
     bool canFollow = Follow(fTarget);

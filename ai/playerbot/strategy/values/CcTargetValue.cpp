@@ -76,7 +76,7 @@ public:
         for (Group::member_citerator itr = groupSlot.begin(); itr != groupSlot.end(); itr++)
         {
             Player *member = sObjectMgr.GetPlayer(itr->guid);
-            if(!member || !sServerFacade.IsAlive(member) || member == bot || bot->GetMapId() != member->GetMapId())
+            if(!member || member == bot || !ai->IsSafe(member) || !sServerFacade.IsAlive(member))
                 continue;
 
             if (!ai->IsTank(member))

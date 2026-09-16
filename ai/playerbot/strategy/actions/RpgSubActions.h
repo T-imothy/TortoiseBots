@@ -337,6 +337,7 @@ namespace ai
     class RpgTradeUsefulAction : public RpgSubAction
     {
     public:
+        bool RequiresWorldOwner() const override { return true; }
         RpgTradeUsefulAction(PlayerbotAI* ai, std::string name = "rpg trade useful") : RpgSubAction(ai, name) {}
 
         virtual std::string GetRpgActionName() const override { return "trading an item to"; };
@@ -349,6 +350,7 @@ namespace ai
     class RpgEnchantAction : public RpgTradeUsefulAction
     {
     public:
+        bool RequiresWorldOwner() const override { return true; }
         RpgEnchantAction(PlayerbotAI* ai, std::string name = "rpg enchant") : RpgTradeUsefulAction(ai, name) {}
 
         virtual std::string GetRpgActionName() const override { return "enchanting an item for"; };

@@ -2,7 +2,9 @@
 #include "playerbot/playerbot.h"
 
 #include "ReactionEngine.h"
+#include "../../../runtime/BotWorldActions.h"
 #include <iomanip>
+#include <memory>
 
 using namespace ai;
 
@@ -36,6 +38,8 @@ ReactionEngine::ReactionEngine(PlayerbotAI* ai, AiObjectContext* factory, BotSta
 
 bool ReactionEngine::FindReaction(bool isStunned)
 {
+    if (WorldContinuationPending())
+        return false;
     // Don't find a new reaction if the previous reaction is still running
     if(!IsReacting())
     {
@@ -61,11 +65,27 @@ bool ReactionEngine::FindReaction(bool isStunned)
                 float reactionRelevance = reactionItem->getRelevance();
                 const Event& reactionEvent = reactionItem->getEvent();
 
+                if (!reactionEvent.HasExpiredOwner() && TortoiseBots::BotWorldActions::IsMapExecution())
+                {
+                    Action* candidate = InitializeAction(reactionItem->getAction());
+                    if (candidate && candidate->RequiresWorldOwner())
+                    {
+                        ScheduleWorldContinuation(reactionEvent, [](Engine& engine)
+                        {
+                            auto& reactionEngine = static_cast<ReactionEngine&>(engine);
+                            reactionEngine.worldReactionFound = reactionEngine.FindReaction(reactionEngine.ai->GetBot()->IsTaxiFlying());
+                        });
+                        break;
+                    }
+                }
+
                 // Extract the reaction from the queue (removed)
-                ActionNode* reactionNode = queue.Pop(reactionItem);
+                std::unique_ptr<ActionNode> reactionNode(queue.Pop(reactionItem));
+                if (reactionEvent.HasExpiredOwner())
+                    continue;
                 if (reactionNode)
                 {
-                    Action* reaction = InitializeAction(reactionNode);
+                    Action* reaction = InitializeAction(reactionNode.get());
                     if (reaction)
                     {
                         // Update the reaction relevance
@@ -93,7 +113,7 @@ bool ReactionEngine::FindReaction(bool isStunned)
                                 if (MultiplyAndPush(reactionNode->getPrerequisites(), reactionRelevance + 0.02, false, reactionEvent, "prereq"))
                                 {
                                     // Add this reaction to the queue again to be processed after the prerequisite
-                                    PushAgain(reactionNode, reactionRelevance + 0.01, reactionEvent);
+                                    PushAgain(reactionNode.release(), reactionRelevance + 0.01, reactionEvent);
                                     continue;
                                 }
                             }
@@ -104,7 +124,6 @@ bool ReactionEngine::FindReaction(bool isStunned)
                                 // Reaction found
                                 incomingReaction.SetAction(reaction);
                                 incomingReaction.SetEvent(reactionEvent);
-                                delete reactionNode;
                                 break;
                             }
                             else
@@ -115,8 +134,6 @@ bool ReactionEngine::FindReaction(bool isStunned)
                         }
                     }
 
-                    // Delete the reaction node
-                    delete reactionNode;
                 }
             }
         }
@@ -133,6 +150,28 @@ bool ReactionEngine::FindReaction(bool isStunned)
 
 bool ReactionEngine::StartReaction()
 {
+    if (WorldContinuationPending())
+        return false;
+    if (incomingReaction.IsValid() && incomingReaction.GetAction()->RequiresWorldOwner())
+    {
+        if (TortoiseBots::BotWorldActions::IsMapExecution())
+        {
+            ScheduleWorldContinuation(incomingReaction.GetEvent(), [](Engine& engine)
+            {
+                static_cast<ReactionEngine&>(engine).StartReaction();
+            });
+            return false;
+        }
+        Action* action = incomingReaction.GetAction();
+        // Eligibility can change between selection and the joined handoff.
+        if (incomingReaction.GetEvent().HasExpiredOwner() ||
+            (ai->GetBot()->IsTaxiFlying() && !action->isUsefulWhenStunned()) ||
+            !action->isUseful() || !action->isPossible())
+        {
+            incomingReaction.Reset();
+            return false;
+        }
+    }
     bool reactionExecuted = false;
     if (incomingReaction.IsValid())
     {
@@ -162,6 +201,17 @@ void ReactionEngine::StopReaction()
 
 bool ReactionEngine::Update(uint32 elapsed, bool minimal, bool isStunned, bool& reactionFound)
 {
+    reactionFound = false;
+    if (WorldContinuationPending())
+        return true;
+    if (worldReactionFound)
+    {
+        worldReactionFound = false;
+        // Let PlayerbotAI apply the native cast/movement interruption before
+        // a subsequent tick starts the reaction, just as synchronous selection.
+        reactionFound = HasIncomingReaction();
+        return reactionFound || IsReacting();
+    }
     aiReactionUpdateDelay = aiReactionUpdateDelay > elapsed ? aiReactionUpdateDelay - elapsed : 0U;
 
     reactionFound = false;
@@ -212,6 +262,8 @@ bool ReactionEngine::Update(uint32 elapsed, bool minimal, bool isStunned, bool& 
 
 bool ReactionEngine::ListenAndExecute(Action* action, Event& event)
 {
+    if (event.HasExpiredOwner())
+        return false;
     bool actionExecuted = false;
     if (actionExecutionListeners.Before(action, event))
     {
@@ -287,6 +339,8 @@ void ReactionEngine::SetReactionDuration(const Action* action)
 
 void ReactionEngine::Reset()
 {
+    CancelWorldContinuation();
+    worldReactionFound = false;
     ongoingReaction.Reset();
     incomingReaction.Reset();
     aiReactionUpdateDelay = 0U;

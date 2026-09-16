@@ -30,15 +30,14 @@ namespace ai
         virtual void ExternalEvent(WorldPacket &packet, Player* owner = NULL) {}
         virtual void ExternalEventForce(std::string param, Player* owner = NULL)
         {
-            this->param = param;
-            this->owner = owner;
+            externalEvent = Event(getName(), param, owner);
             this->triggered = true;
         }
         virtual bool IsActive() { return false; }
         virtual bool IsAlreadyTriggered() { return triggered; }
         virtual NextAction** getHandlers() { return NULL; }
         void Update() {}  //Nonfunctional see AiObjectContext::Update() to enable.
-        virtual void Reset() { triggered = false; }
+        virtual void Reset() { triggered = false; externalEvent = Event(); }
         virtual Unit* GetTarget();
         virtual Value<Unit*>* GetTargetValue();
         virtual std::string GetTargetName() { return "self target"; }
@@ -66,7 +65,7 @@ namespace ai
 		time_t lastCheckTime;
         std::string param;
         bool triggered;
-        Player* owner = nullptr;
+        Event externalEvent;
 	};
 
 

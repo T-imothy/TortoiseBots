@@ -7,6 +7,7 @@ namespace ai
 {
     class GuildAcceptAction : public Action {
     public:
+        bool RequiresWorldOwner() const override { return true; }
         GuildAcceptAction(PlayerbotAI* ai) : Action(ai, "guild accept") {}
         virtual bool Execute(Event& event) override;
         virtual bool isUsefulWhenStunned() override { return true; }

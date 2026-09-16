@@ -31,10 +31,17 @@ grep -q 'ADD COLUMN IF NOT EXISTS' data/sql/world/20260824090002_world.sql \
     || fail "World compatibility migration is not additive"
 grep -q 'scale_32' data/sql/char/20260824090002_char.sql \
     || fail "Char compatibility migration lacks scale_32"
-grep -q 'DROP TABLE IF EXISTS' data/sql/world/20260824090003_world.sql \
-    || fail "World cleanup migration lacks explicit dead-table cleanup"
-grep -q 'DROP TABLE IF EXISTS' data/sql/char/20260824090003_char.sql \
-    || fail "Char cleanup migration lacks explicit dead-table cleanup"
+# ManTech migration preserves legacy state for import/rollback. Cleanup must not
+# silently discard persistent values before the module-owned import runs.
+if rg -n -i '^[[:space:]]*DROP[[:space:]]+TABLE' \
+    data/sql/world/20260824090003_world.sql data/sql/char/20260824090003_char.sql; then
+    fail "automatic module cleanup destroys preserved legacy state"
+fi
+test -f data/sql/char/20260912090000_char.sql || fail "persistent value migration is missing"
+grep -q 'legacy_owner_zero_v1' data/sql/char/20260912090000_char.sql \
+    || fail "persistent value import lacks its one-time marker"
+grep -q 'PRIMARY KEY (`bot`, `event`)' data/sql/char/20260912090000_char.sql \
+    || fail "persistent value identity is not unique"
 
 if rg -n -i 'rtsc|see spell|bossaura|ai_playerbot_(random_bots|rpg_races|tele_cache|rarity_cache)' \
     ai host runtime commands conf; then

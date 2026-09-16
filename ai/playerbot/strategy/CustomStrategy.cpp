@@ -6,6 +6,7 @@
 
 using namespace ai;
 
+std::recursive_mutex CustomStrategy::cacheMutex;
 std::map<std::string, std::string> CustomStrategy::actionLinesCache;
 std::map<CustomStrategy::CacheKey, std::list<std::string>> CustomStrategy::loadedLines;
 
@@ -58,6 +59,7 @@ TriggerNode* toTriggerNode(std::string actionLine)
 
 void CustomStrategy::InitNonCombatTriggers(std::list<TriggerNode*> &triggers)
 {
+    std::lock_guard<std::recursive_mutex> cacheGuard(cacheMutex);
     if (actionLines.empty())
     {
         if (actionLinesCache[qualifier].empty())
@@ -133,6 +135,7 @@ void CustomStrategy::LoadActionLines(uint32 owner)
 
 void CustomStrategy::Reset()
 {
+    std::lock_guard<std::recursive_mutex> cacheGuard(cacheMutex);
     actionLines.clear();
     actionLinesCache[qualifier].clear();
     ForgetCached(qualifier);
@@ -142,6 +145,7 @@ void CustomStrategy::Reset()
 // them again rather than serving what was true before the edit.
 void CustomStrategy::ForgetCached(std::string const& forQualifier)
 {
+    std::lock_guard<std::recursive_mutex> cacheGuard(cacheMutex);
     for (std::map<CacheKey, std::list<std::string>>::iterator i = loadedLines.begin(); i != loadedLines.end();)
     {
         if (i->first.first == forQualifier)

@@ -9,6 +9,7 @@ namespace ai
     class CheckMailAction : public Action
     {
     public:
+        bool RequiresWorldOwner() const override { return true; }
         CheckMailAction(PlayerbotAI* ai) : Action(ai, "check mail") {}
 
 #ifdef GenerateBotHelp
@@ -25,7 +26,5 @@ namespace ai
         virtual bool Execute(Event& event) override;
         virtual bool isUseful() override;
 
-    private:
-        void ProcessMail(Mail* mail, Player* owner);
     };
 }

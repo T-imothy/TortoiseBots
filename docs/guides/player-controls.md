@@ -159,3 +159,156 @@ ManTech permission detail: `.ahbot` and `.bot ah` require the core's
 a live Player. Ordinary bot commands remain available at player rank subject
 to the module's existing ownership checks. Native command registration handles
 RBAC, console eligibility and command dispatch before handlers run.
+
+
+## Bot performance diagnostics for administrators
+
+`.perfmon toggle` enables/disables bot profiling, `.perfmon reset` clears its
+counters, and `.perfmon [tick] [stack] [map]` writes the report to the server log.
+The registered command defaults to moderator access and supports the server console;
+normal command permissions and RBAC still apply. Profiling remains optional.
+
+
+## Random population administration
+
+`.rndbot` is a native administrator command and is also available from the
+console or a console-ranked SOAP account. The registered command's RBAC policy
+is checked before dispatch. `.rndbot stats` reports population and queued work;
+`.rndbot update` requests the next population reconciliation pass.
+
+`.rndbot refresh|upgrade|revive|change_strategy|remove <name-prefix|all>` queues
+the operation for matching live random bots. Owned bots are excluded. Work runs
+in bounded batches during the world-owned maintenance phase; pending requests
+are deduplicated and revalidated by GUID and login generation before execution. Reclaimed, removed or
+teleporting bots are skipped. Refresh/upgrade can alter equipment and abilities;
+remove logs bots out through the native lifecycle. Normal population policy may
+later replace a removed bot. These commands do not change the configured target.
+
+`rndbot init <name-prefix|all>` queues native factory initialization. It respects
+configured level bounds, maximum-level probability, human-level synchronization
+and DisableRandomLevels. Busy, grouped, human-controlled and real-guild bots are
+excluded. Initialization can change levels, equipment and abilities.
+
+`rndbot teleport|rpg|grind <name-prefix|all>` queues native relocation for eligible
+ungrouped random bots. Teleport selects a level-fitting grind destination; grind
+restricts the search to RandomBotTeleportDistance; rpg selects a friendly inn and
+updates the home bind only after native teleport acceptance. Every point must
+pass area-level, faction, terrain and navmesh checks. Missing destinations leave
+the bot in place. Explicit admin requests work independently of automatic login
+teleports. These operations do not force grouped, leased, pinned, dead or busy
+bots to move. Unlike the old global fallback, local grind remains local.
+
+`rndbot reset` resets persistent random-population events except temporary
+membership, clears pending admin work and requests target reconciliation after
+the database accepts the write. It does not delete characters or accounts.
+Invalid commands report an error without changing the population.
+
+
+`rndbot pid <p> <i> <d>` restores administrative tuning of the world-owned
+activity controller. It requires exactly three finite numbers and normal rndbot
+permissions; invalid or disabled-module requests do not mutate the controller.
+Retuning clears accumulated history. `rndbot stats` includes the current activity
+percentage. Whisper `help` opens the native module help catalog.
+
+`rndbot diff` reports native average/maximum world update time and current activity
+targets. `rndbot diff <player-ms> <empty-ms>` changes both positive integer targets
+for this process; malformed, zero, negative or overflowing values change neither.
+Initialization also excludes pinned bots and bots reserved by another service.
+The retired `clean map` operation is intentionally unavailable: it detached
+threads to unload map/vmap data while native owners could still be using it.
+Native map lifetime and cleanup remain authoritative. The old login-manager debug
+toggle has no native manager counterpart; use `.bot stats` and headless lifecycle
+logs for current state.
+
+Random-bot RPG relocation filters destinations for innkeeper metadata before
+spending its bounded terrain validation budget. Relocation samples up to 32
+distinct destinations and eight distinct points per destination. Local grinding
+checks the selected spawn's map and distance as well as the destination filter,
+so a nearby spawn does not authorize teleporting to another distant spawn of
+the same creature. Native terrain, navigation and faction checks still apply.
+
+Delayed commands are canceled if their requester logs out or the character is
+released back to client control. They are not replayed for a later login or
+reinterpreted as a command from the bot's current master. Teleporting a jumping
+bot cancels its previous pending landing rather than applying old coordinates.
+
+Guild join completion is reported only after the native guild admits the bot.
+Stale or superseded invitations cannot accept a different guild, and a rejected
+guild leave does not report success. Nearby guild management stays within the
+bot's current guild and requires current membership records.
+
+Group invitation commands retain immediate native invite/accept behavior. Rejected
+invites and group leaves are not reported as completed bot ownership transitions.
+Mailbox collection reports only money/attachments accepted by the native handler;
+failed COD or inventory checks leave the attachment available. A bot can collect
+money with full bags. Unsellable items stay in inventory when a COD sale is refused.
+
+Combat stuns no longer impersonate logout requests. The AI consults the native
+session logout flag and pauses while its timer is pending. The mature chat logout
+intent is consumed by BotManager outside the AI stack, with saved teardown behind
+the removal guard; logout cancel can clear an intent that has not yet been consumed.
+Native headless sessions now honor an actual elapsed logout timer on the world
+packet owner. Map packet processing and ordinary stuns cannot expire the session.
+This corrects the snapshot-candidate live fixture unexpectedly removing itself
+after login (the failed native-snapshot-packet check remains failure evidence).
+
+
+### RPG inn travel cooldown (2026-09-12)
+
+Accepted administrative RPG relocation now clears the old travel target and
+restores its ten-minute cooldown after Reset. This preserves the inn dwell time
+from the ManTech donor RandomPlayerbotMgr.cpp at baseline
+37aee50d6bfbf9194dd5e3c79a156d9bfcb4f569. Native rejected teleports preserve the
+existing target; grind relocations do not acquire the RPG delay. The module uses
+its existing TravelMgr and TravelTarget APIs; there is no new core hook.
+ModuleRandomRelocationTest covers rejection, reset ordering, RPG/grind distinction
+and a missing optional travel target using the actual relocation function.
+
+
+### Administrative native revival (2026-09-12)
+
+The rndbot revive adapter now performs actual native recovery through Refresh,
+reports refusal instead of completing a no-op graveyard release, and clears the
+legacy dead/revive event markers only after accepted resurrection. Alive and BG
+bots are excluded. Rescue uses the existing terrain-validated relocation service:
+nearby grind for an unreleased corpse, level-fitting grind for a ghost. Existing
+group/master, pin, lease, map, combat, taxi and destination checks still apply.
+Failed rescue relocation preserves successful revival at the current location
+and is logged separately; it is not mislabeled as a completed teleport.
+
+Source: ManTech RandomPlayerbotMgr::Revive, RandomTeleport and
+RandomTeleportForLevel at baseline 37aee50d6bfbf9194dd5e3c79a156d9bfcb4f569.
+The donor's live SetPosition loop used while probing nearby candidates was not
+ported; it bypassed native movement/transfer ownership. Existing bounded validated
+destination selection preserves the rescue intent. Automatic ProcessBot never
+calls administrative revival and retains native death AI ownership.
+ModuleNativeRefreshTest compiles both actual adapters, covering native refusal,
+corpse/ghost selection, failed optional relocation, BG/alive/map exclusions,
+event cleanup timing and repeated requests. No core hook or schema was added.
+
+Automatic `check mail` returns complete unrequested item messages through the native mailbox handler. Requested and auction mail are retained; full return failures leave the message untouched. Guild/travel/speech/gear actions execute after map work joins when invoked from map decisions.
+
+
+### Follow domains and serial map probe (2026-09-12)
+
+Cross-map following resumes on the world thread, while nearby follow decisions remain on their native map owner. Commands and corpse recovery retain the native world entry point.
+
+Bot TellPlayer/TellPlayerNoFacing messages from map decisions now retain copied text/options and a revocable recipient Event, then run security, repeat suppression and delivery on the world owner. Admission does not report completed delivery. Facing requires the actual same map/instance. TellPlayer forwards ignoreSilent to the intended argument while retaining repeat suppression.
+
+
+### Pending invitations survive strategy refresh (2026-09-13)
+
+A real TCP regression showed the native server successfully inviting a bot,
+then the initial `update pve strats` action rebuilding the graph before its
+queued `accept invitation` ran. The packet event was consumed but the native
+Player still held its pending Group invitation. GroupInvitationTrigger now
+reads that existing native pointer as a boolean; it retains no Group object
+and introduces no second invitation state. The unchanged world-owned
+AcceptInvitationAction resolves the current inviter, checks security, and
+uses native HandleGroupAcceptOpcode. Native accept, decline and cancellation
+remove the trigger condition. ModulePendingGroupInviteTest covers graph
+replacement, deferred decisions, cancellation and a new invitation. The failed
+runtime trace is preserved in the local reports history; repeated live invite
+acceptance must pass on the new artifact before this defect is marked resolved.
+Source: current native GroupHandler.cpp and Player::GetGroupInvite, active
+Engine::Init/Reset and AcceptInvitationAction; independently implemented trigger.

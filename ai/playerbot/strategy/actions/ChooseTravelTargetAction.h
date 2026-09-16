@@ -12,6 +12,7 @@ namespace ai
 
     class ChooseTravelTargetAction : public Action {
     public:
+        bool RequiresWorldOwner() const override { return true; }
         ChooseTravelTargetAction(PlayerbotAI* ai, std::string name = "choose travel target") : Action(ai, name) {}
 
         virtual bool Execute(Event& event) override;
@@ -64,6 +65,7 @@ namespace ai
 
     class RequestTravelTargetAction : public Action, public Qualified {
     public:
+        bool RequiresWorldOwner() const override { return true; }
         RequestTravelTargetAction(PlayerbotAI* ai, std::string name = "request travel target") : Action(ai, name), Qualified() {}
     private:
         virtual bool Execute(Event& event) override;

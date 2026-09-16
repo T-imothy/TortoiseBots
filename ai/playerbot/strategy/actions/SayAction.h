@@ -9,6 +9,7 @@ namespace ai
     class SayAction : public Action, public Qualified
     {
     public:
+        bool RequiresWorldOwner() const override { return true; }
         SayAction(PlayerbotAI* ai);
         virtual bool Execute(Event& event) override;
         virtual bool isUseful() override;
@@ -50,6 +51,7 @@ namespace ai
     class SpeakAction : public Action, public Qualified
     {
     public:
+        bool RequiresWorldOwner() const override { return true; }
         SpeakAction(PlayerbotAI* ai) : Action(ai, "speak"), Qualified() {};
         virtual bool Execute(Event& event) override;
         virtual bool isUsefulWhenStunned() override { return true; }

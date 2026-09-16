@@ -1,6 +1,7 @@
 
 #include "playerbot/playerbot.h"
 #include "GuildValues.h"
+#include <mutex>
 #include "playerbot/strategy/values/BudgetValues.h"
 #include "playerbot/strategy/values/ItemUsageValue.h"
 #include "playerbot/strategy/values/SharedValueContext.h"
@@ -37,6 +38,8 @@ char* strstri(const char* haystack, const char* needle);
 uint32 GuildOrderValue::FindItemByName(const std::string& name)
 {
     static std::unordered_map<std::string, uint32> s_cache;
+    static std::mutex cacheMutex;
+    std::lock_guard<std::mutex> cacheGuard(cacheMutex);
 
     std::string lowerName = name;
     std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), [](unsigned char c) { return std::tolower(c); });
@@ -75,6 +78,8 @@ uint32 GuildOrderValue::FindItemByName(const std::string& name)
 std::vector<std::pair<uint32, int8>> ai::FindRepeatableQuestsRewardingItem(uint32 itemId)
 {
     static std::unordered_map<uint32, std::vector<std::pair<uint32, int8>>> s_cache;
+    static std::mutex cacheMutex;
+    std::lock_guard<std::mutex> cacheGuard(cacheMutex);
 
     auto cacheIt = s_cache.find(itemId);
     if (cacheIt != s_cache.end())
@@ -1044,7 +1049,7 @@ GuildShareTarget GuildShareTargetValue::Calculate()
     for (auto& guid : nearGuids)
     {
         Player* player = sObjectMgr.GetPlayer(guid);
-        if (!player || player == bot)
+        if (!player || player == bot || !PlayerbotAI::IsSafe(bot, player))
             continue;
 
         if (player->GetGuildId() != bot->GetGuildId())
@@ -1091,7 +1096,7 @@ GuildShareTarget GuildShareTargetValue::Calculate()
                     needed = canGive;
             }
 
-            result.receiver = player;
+            result.receiverGuid = player->GetObjectGuid();
             result.itemId = entry.itemId;
             result.amount = needed;
             return result;
@@ -1102,6 +1107,15 @@ GuildShareTarget GuildShareTargetValue::Calculate()
 }
 
 std::vector<uint32> NeedsProfessionReagentsValue::GetMissingReagents(PlayerbotAI* ai)
+{
+    if (!TortoiseBots::BotWorldActions::IsMapExecution())
+        return GuildMissingReagentsValue(ai).Calculate();
+    // Map travel selection consumes copied item IDs; world purchase callers
+    // retain the original fresh native inventory/deficit calculation.
+    return ai->GetAiObjectContext()->GetValue<std::vector<uint32>>("guild missing reagents")->Get();
+}
+
+std::vector<uint32> GuildMissingReagentsValue::Calculate()
 {
     std::vector<uint32> missing;
     Player* bot = ai->GetBot();
@@ -1304,4 +1318,11 @@ bool CanBuyTabard::Calculate()
 		return false;
 
 	return true;
+}
+
+
+std::string GuildMotdValue::Calculate()
+{
+    Guild* guild = bot->GetGuildId() ? sGuildMgr.GetGuildById(bot->GetGuildId()) : nullptr;
+    return guild ? guild->GetMOTD() : std::string();
 }

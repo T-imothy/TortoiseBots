@@ -14,6 +14,8 @@ using namespace ai;
 
 bool ReviveFromCorpseAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
     Player* requester = event.GetOwner() ? event.GetOwner() : GetMaster();
     Player* master = ai->GetGroupMaster();
     Corpse* corpse = bot->GetCorpse();
@@ -62,6 +64,8 @@ bool ReviveFromCorpseAction::Execute(Event& event)
     WorldPacket packet(CMSG_RECLAIM_CORPSE);
     packet << bot->getObjectGuid();
     bot->GetSession()->HandleReclaimCorpseOpcode(packet);
+    if (!bot->IsAlive())
+        return false;
 
     SET_AI_VALUE(bool, "corpse run", false);
     // Post-rez rescue (best-effort, fail-closed): a random bot that keeps dying
@@ -83,6 +87,8 @@ bool ReviveFromCorpseAction::Execute(Event& event)
 
 bool FindCorpseAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
     if (bot->InBattleGround())
         return false;
 
@@ -286,6 +292,8 @@ bool FindCorpseAction::isUseful()
 
 bool SpiritHealerAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
     Player* requester = event.GetOwner() ? event.GetOwner() : GetMaster();
     Corpse* corpse = bot->GetCorpse();
     if (!corpse)
@@ -336,6 +344,8 @@ bool SpiritHealerAction::Execute(Event& event)
         sLog.outDetail("Bot #%d %s:%d <%s> revives at spirit healer", bot->GetGUIDLow(), bot->GetTeam() == ALLIANCE ? "A" : "H", bot->GetLevel(), bot->GetName());
         PlayerbotChatHandler ch(bot);
         bot->ResurrectPlayer(0.5f, !ai->HasCheat(BotCheatMask::repair));
+        if (!bot->IsAlive())
+            return false;
         bot->DurabilityLossAll(0.25f, true);
 
         bot->SpawnCorpseBones();

@@ -15,7 +15,7 @@ Unit* AggressiveTargetValue::Calculate()
 {
     Player* master = GetMaster();
 
-    if (master && (master == bot || master->GetMapId() != bot->GetMapId() || master->IsBeingTeleported() ||
+    if (master && (master == bot || !ai->IsSafe(master) ||
                    !GET_PLAYERBOT_AI(master)))
         master = nullptr;
 

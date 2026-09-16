@@ -1,3 +1,5 @@
+#include "PlayerbotAIStorage.h"
+#include "playerbot/PlayerbotAI.h"
 #include "RandomBotService.h"
 #include "BotActivityLease.h"
 
@@ -7,6 +9,8 @@
 #include "ObjectAccessor.h"
 #include "ObjectMgr.h"
 #include "Player.h"
+#include "Map.h"
+#include "LFT/LFTMgr.h"
 #include "World.h"
 #include "WorldSession.h"
 #include "Log.h"
@@ -17,6 +21,7 @@
 #include "SharedDefines.h"
 #include "Database/DBCStores.h"
 #include "Util.h"
+#include "../host/ModuleLog.h"
 
 #if __has_include("Handlers/CharacterCreation.h")
 #include "Handlers/CharacterCreation.h"
@@ -32,6 +37,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <ctime>
+#include <sstream>
 #include <memory>
 #include <random>
 #include <set>
@@ -132,6 +138,8 @@ void RandomBotService::Initialize()
 
     m_initialized = true;
     m_serviceElapsedMs = 0;
+    m_targetReady = false;
+    m_activity = BotActivityController{};
     m_pinnedGuids.clear();
     m_pinnedResolved = false;
     m_rndBotAccountIds.clear();
@@ -144,33 +152,262 @@ void RandomBotService::Initialize()
     m_pendingNextRetry = 0;
     m_pendingSince = 0;
     m_pendingStaleLogged = false;
+    m_resetPending = false;
+    m_resetFailed = false;
+    m_nextResetAccount = 0;
+    m_resetAccountIds.clear();
+    m_initializedThisRun.clear();
     if (!sPlayerbotAIConfig.enabled)
     {
-        sLog.outString("TortoiseBots: native random-bot service disabled by configuration");
+        TB_LOG_BASIC("TortoiseBots: native random-bot service disabled by configuration");
         return;
+    }
+    if (sPlayerbotAIConfig.deleteRandomBotAccounts)
+    {
+        if (!PrepareAccountReset())
+        {
+            m_resetFailed = true;
+            sLog.outError("TortoiseBots: random-account reset refused; population service will not start");
+            return;
+        }
+        if (m_resetPending)
+            return;
     }
     // Load pool even if autologin is off when auto-create is on: the deficit
     // check needs the real candidate set.
     if (!sPlayerbotAIConfig.randomBotAutologin && !sPlayerbotAIConfig.randomBotAutoCreate)
     {
-        sLog.outString("TortoiseBots: native random-bot service disabled by configuration");
+        TB_LOG_BASIC("TortoiseBots: native random-bot service disabled by configuration");
         return;
     }
 
     LoadCandidates();
-    // m_targetCount historically capped to candidates size. With auto-create
-    // the desired target may exceed current candidates, so keep desired when
-    // auto-create is enabled.
-    if (sPlayerbotAIConfig.randomBotAutoCreate)
-        m_targetCount = DesiredTargetCount();
-    else
-        m_targetCount = TargetCount();
+    RefreshPopulationTarget();
     m_started = sPlayerbotAIConfig.randomBotLoginAtStartup &&
         (!sPlayerbotAIConfig.randomBotLoginWithPlayer || m_humanSessions > 0);
 
-    sLog.outString("TortoiseBots: native random-bot pool loaded (%u candidates, target %u, startup %u, autoCreate %u)",
+    TB_LOG_BASIC("TortoiseBots: native random-bot pool loaded (%u candidates, target %u, startup %u, autoCreate %u)",
         static_cast<uint32>(m_candidates.size()), m_targetCount, m_started, sPlayerbotAIConfig.randomBotAutoCreate ? 1 : 0);
 }
+
+bool RandomBotService::PrepareAccountReset()
+{
+    // Only accounts with the exact six-digit suffix emitted by this service
+    // are eligible. A wildcard, altered prefix, or ambiguous account aborts
+    // rather than widening a destructive reset to human-owned accounts.
+    std::string const& prefix = sPlayerbotAIConfig.randomBotAccountPrefix;
+    if (prefix.empty() || prefix.size() + 6 > MAX_ACCOUNT_STR ||
+        !std::all_of(prefix.begin(), prefix.end(), [](char c) {
+            return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
+        }))
+        return false;
+
+    std::string escaped = prefix;
+    LoginDatabase.escape_string(escaped);
+    std::unique_ptr<QueryResult> count(LoginDatabase.PQuery(
+        "SELECT COUNT(*) FROM account WHERE username LIKE '%s%%'", escaped.c_str()));
+    if (!count)
+        return false;
+    if (!count->Fetch()[0].GetUInt64())
+        return true;
+
+    std::unique_ptr<QueryResult> rows(LoginDatabase.PQuery(
+        "SELECT id, username FROM account WHERE username LIKE '%s%%' ORDER BY id", escaped.c_str()));
+    if (!rows)
+        return false;
+    do
+    {
+        Field* fields = rows->Fetch();
+        std::string const name = fields[1].GetCppString();
+        if (name.size() != prefix.size() + 6 ||
+            !std::equal(prefix.begin(), prefix.end(), name.begin(), [](char a, char b) {
+                if (a >= 'a' && a <= 'z') a -= 'a' - 'A';
+                if (b >= 'a' && b <= 'z') b -= 'a' - 'A';
+                return a == b;
+            }) ||
+            !std::all_of(name.begin() + prefix.size(), name.end(), [](char c) {
+                return c >= '0' && c <= '9';
+            }))
+        {
+            sLog.outError("TortoiseBots: reset refused: prefix also matches non-generated account %s", name.c_str());
+            m_resetAccountIds.clear();
+            return false;
+        }
+        m_resetAccountIds.push_back(fields[0].GetUInt32());
+    } while (rows->NextRow());
+    m_resetPending = !m_resetAccountIds.empty();
+    sLog.outString("TortoiseBots: configured one-start reset queued for %u generated accounts; set DeleteRandomBotAccounts back to 0 after this start",
+        static_cast<uint32>(m_resetAccountIds.size()));
+    return true;
+}
+
+void RandomBotService::ProgressAccountReset()
+{
+    if (!m_resetPending || m_resetFailed)
+        return;
+    if (m_nextResetAccount < m_resetAccountIds.size())
+    {
+        uint32 const accountId = m_resetAccountIds[m_nextResetAccount];
+        if (sWorld.FindSession(accountId))
+        {
+            m_resetFailed = true;
+            sLog.outError("TortoiseBots: reset stopped: account %u has a network session", accountId);
+            return;
+        }
+        std::unique_ptr<QueryResult> owned(CharacterDatabase.PQuery(
+            "SELECT guid FROM characters WHERE account=%u", accountId));
+        if (owned)
+        {
+            if (m_resetCharacterAccount != accountId)
+            {
+                do
+                {
+                    ObjectGuid guid(HIGHGUID_PLAYER, owned->Fetch()[0].GetUInt32());
+                    Player::DeleteFromDB(guid, accountId, false, true);
+                } while (owned->NextRow());
+                m_resetCharacterAccount = accountId;
+            }
+            // Observe completion before AccountMgr queries these same characters.
+            return;
+        }
+        if (sAccountMgr.DeleteAccount(accountId) != AOR_OK)
+        {
+            m_resetFailed = true;
+            sLog.outError("TortoiseBots: random-account reset stopped at account %u; population remains disabled", accountId);
+            return;
+        }
+        ++m_nextResetAccount;
+        m_resetCharacterAccount = 0;
+        return; // One native account deletion per cadence; never a startup-long loop.
+    }
+
+    // AccountMgr uses asynchronous database writes. Do not load candidates or
+    // begin creating a replacement cohort until both databases have observed
+    // removal of the old account/character ownership.
+    std::string escaped = sPlayerbotAIConfig.randomBotAccountPrefix;
+    LoginDatabase.escape_string(escaped);
+    std::unique_ptr<QueryResult> accounts(LoginDatabase.PQuery(
+        "SELECT COUNT(*) FROM account WHERE username LIKE '%s%%'", escaped.c_str()));
+    if (!accounts || accounts->Fetch()[0].GetUInt64())
+        return;
+    std::ostringstream sql;
+    sql << "SELECT COUNT(*) FROM characters WHERE account IN (";
+    for (size_t i = 0; i < m_resetAccountIds.size(); ++i)
+    {
+        if (i) sql << ',';
+        sql << m_resetAccountIds[i];
+    }
+    sql << ')';
+    std::unique_ptr<QueryResult> characters(CharacterDatabase.Query(sql.str().c_str()));
+    if (!characters || characters->Fetch()[0].GetUInt64())
+        return;
+
+    m_resetPending = false;
+    m_resetAccountIds.clear();
+    LoadCandidates();
+    RefreshPopulationTarget();
+    m_started = sPlayerbotAIConfig.randomBotLoginAtStartup &&
+        (!sPlayerbotAIConfig.randomBotLoginWithPlayer || m_humanSessions > 0);
+    sLog.outString("TortoiseBots: random-account reset complete; replacement population may now be created");
+}
+
+uint32_t RandomBotService::QueueAdminAction(RandomBotAdminAction action, std::string selector)
+{
+    if (!m_initialized || !sPlayerbotAIConfig.enabled || selector.empty()) return 0;
+    bool const all = selector == "all" || selector == "%";
+    if (!all && !normalizePlayerName(selector)) return 0;
+    uint32_t queued = 0;
+    for (Player* player : BotManager::Instance().GetAllBots())
+    {
+        if (!player || !BotManager::Instance().IsRandomBot(player->GetObjectGuid()) ||
+            (!all && std::string(player->GetName()).rfind(selector, 0) != 0)) continue;
+        auto const* record = BotManager::Instance().FindBot(player->GetObjectGuid());
+        if (!record || !record->generation) continue;
+        auto key = std::make_pair(player->GetGUIDLow(), action);
+        if (!m_adminKeys.insert(key).second) continue;
+        m_adminRequests.push_back({player->GetObjectGuid(), action, record->generation});
+        ++queued;
+    }
+    return queued;
+}
+
+void RandomBotService::RequestUpdate()
+{
+    m_serviceElapsedMs = std::max<uint32_t>(100, sPlayerbotAIConfig.randomBotUpdateInterval);
+}
+
+bool RandomBotService::ResetPersistentState()
+{
+    if (!m_initialized || !sPlayerbotAIConfig.enabled || !sRandomBotFacade.ResetPersistentValues()) return false;
+    m_adminRequests.clear();
+    m_adminKeys.clear();
+    m_targetReady = false;
+    RequestUpdate();
+    return true;
+}
+
+void RandomBotService::ProcessAdminActions()
+{
+    uint32_t const started = WorldTimer::getMSTime();
+    uint32_t const limit = std::max<uint32_t>(1, sPlayerbotAIConfig.randomBotMaintenanceBatch);
+    for (uint32_t count = 0; count < limit && !m_adminRequests.empty(); ++count)
+    {
+        if (count && WorldTimer::getMSTimeDiff(started, WorldTimer::getMSTime()) >=
+            sPlayerbotAIConfig.randomBotMaintenanceBudgetMs) break;
+        AdminRequest request = m_adminRequests.front();
+        m_adminRequests.pop_front();
+        m_adminKeys.erase({request.guid.GetCounter(), request.action});
+        Player* player = sObjectAccessor.FindPlayer(request.guid);
+        auto const* record = BotManager::Instance().FindBot(request.guid);
+        // Human reclaim, logout, removal or failed attachment cancels the work.
+        if (!player || !record || record->generation != request.generation ||
+            !BotManager::Instance().IsRandomBot(request.guid) ||
+            !BotManager::Instance().IsControllableBot(player) || player->IsBeingTeleported()) continue;
+        std::string const name = player->GetName();
+        switch (request.action)
+        {
+            case RandomBotAdminAction::Teleport:
+            case RandomBotAdminAction::Rpg:
+            case RandomBotAdminAction::Grind:
+                if (!BotManager::Instance().RelocateRandomBot(player,
+                    request.action == RandomBotAdminAction::Rpg ? RandomBotDestination::Rpg :
+                    request.action == RandomBotAdminAction::Grind ? RandomBotDestination::LocalGrind : RandomBotDestination::Level))
+                {
+                    sLog.outString("TortoiseBots: skipped random-bot relocation for %s (eligibility or no validated destination)", name.c_str());
+                    continue;
+                }
+                break;
+            case RandomBotAdminAction::Initialize:
+                if (!sRandomBotFacade.InitializeBot(player))
+                {
+                    sLog.outString("TortoiseBots: skipped random-bot initialization for %s (native eligibility)", name.c_str());
+                    continue;
+                }
+                break;
+            case RandomBotAdminAction::Refresh:
+                if (!sRandomBotFacade.Refresh(player))
+                {
+                    sLog.outString("TortoiseBots: skipped random-bot refresh for %s (native eligibility or recovery rejected)", name.c_str());
+                    continue;
+                }
+                break;
+            case RandomBotAdminAction::Upgrade: sRandomBotFacade.UpdateGearSpells(player); break;
+            case RandomBotAdminAction::Revive:
+                if (!sRandomBotFacade.Revive(player))
+                {
+                    sLog.outString("TortoiseBots: skipped random-bot revival for %s (native eligibility or recovery rejected)", name.c_str());
+                    continue;
+                }
+                break;
+            case RandomBotAdminAction::ChangeStrategy: sRandomBotFacade.ChangeStrategy(player); break;
+            case RandomBotAdminAction::Remove: BotManager::Instance().RemoveBot(request.guid, true); break;
+        }
+        // Removal can destroy Player; use only the name copied beforehand.
+        sLog.outString("TortoiseBots: completed queued random-bot admin action %u for %s",
+            static_cast<unsigned>(request.action), name.c_str());
+    }
+}
+// End bounded random-bot admin requests.
 
 void RandomBotService::LoadCandidates()
 {
@@ -181,6 +418,7 @@ void RandomBotService::LoadCandidates()
     m_rndBotAccountIds.clear();
     m_nextCandidate = 0;
     m_nextMaintenance = 0;
+    m_nextRemoval = 0;
 
     std::set<uint32> accountIds;
     std::unique_ptr<QueryResult> accounts(LoginDatabase.PQuery("SELECT id FROM account WHERE username LIKE '%s%%'",
@@ -235,32 +473,60 @@ void RandomBotService::LoadCandidates()
     m_randomizeAgeMs.assign(m_candidates.size(), 0);
 }
 
-uint32 RandomBotService::TargetCount() const
+void RandomBotService::RefreshPopulationTarget()
 {
-    uint32 minCount = std::min(sPlayerbotAIConfig.minRandomBots, sPlayerbotAIConfig.maxRandomBots);
-    uint32 maxCount = std::max(sPlayerbotAIConfig.minRandomBots, sPlayerbotAIConfig.maxRandomBots);
-    if (!maxCount || m_candidates.empty())
-        return 0;
-
-    uint32 range = maxCount - minCount;
-    uint32 configuredTarget = minCount;
-    if (range)
-        configuredTarget += static_cast<uint32>(std::time(nullptr) % (range + 1));
-
-    return std::min<uint32>(configuredTarget, static_cast<uint32>(m_candidates.size()));
+    uint32 const minimum = std::min(sPlayerbotAIConfig.minRandomBots, sPlayerbotAIConfig.maxRandomBots);
+    uint32 const maximum = std::max(sPlayerbotAIConfig.minRandomBots, sPlayerbotAIConfig.maxRandomBots);
+    uint32 desired = sRandomBotFacade.GetValue(uint32(0), "bot_count");
+    bool const selectedZero = m_targetReady && m_desiredTargetCount == 0 && minimum == 0;
+    if (desired < minimum || desired > maximum || (!desired && maximum && !selectedZero))
+    {
+        desired = DesiredTargetCount();
+        sRandomBotFacade.SetValue(uint32(0), "bot_count", desired);
+    }
+    else if (!maximum && desired)
+    {
+        desired = 0;
+        sRandomBotFacade.SetValue(uint32(0), "bot_count", 0);
+    }
+    m_desiredTargetCount = desired;
+    m_targetCount = sPlayerbotAIConfig.randomBotAutoCreate ? desired :
+        std::min<uint32>(desired, uint32(m_candidates.size()));
+    m_targetReady = true;
 }
 
 uint32 RandomBotService::DesiredTargetCount() const
 {
-    uint32 minCount = std::min(sPlayerbotAIConfig.minRandomBots, sPlayerbotAIConfig.maxRandomBots);
-    uint32 maxCount = std::max(sPlayerbotAIConfig.minRandomBots, sPlayerbotAIConfig.maxRandomBots);
-    if (!maxCount)
-        return 0;
-    uint32 range = maxCount - minCount;
-    uint32 configuredTarget = minCount;
-    if (range)
-        configuredTarget += static_cast<uint32>(std::time(nullptr) % (range + 1));
-    return configuredTarget;
+    return urand(std::min(sPlayerbotAIConfig.minRandomBots, sPlayerbotAIConfig.maxRandomBots),
+        std::max(sPlayerbotAIConfig.minRandomBots, sPlayerbotAIConfig.maxRandomBots));
+}
+
+void RandomBotService::RemoveSurplusBots(uint32_t online)
+{
+    if (online <= m_targetCount || m_candidates.empty()) return;
+    uint32 const budget = std::min(online - m_targetCount,
+        std::max<uint32>(1, sPlayerbotAIConfig.randomBotsMaxLoginsPerInterval));
+    uint32 const started = WorldTimer::getMSTime();
+    uint32 removed = 0;
+    size_t const limit = std::min<size_t>(m_candidates.size(), sPlayerbotAIConfig.randomBotMaintenanceBatch);
+    for (size_t examined = 0; examined < limit && removed < budget; ++examined)
+    {
+        if (examined && WorldTimer::getMSTimeDiff(started, WorldTimer::getMSTime()) >=
+            sPlayerbotAIConfig.randomBotMaintenanceBudgetMs) break;
+        Candidate const candidate = m_candidates[m_nextRemoval++ % m_candidates.size()];
+        uint32 const guid = candidate.characterGuid.GetCounter();
+        auto* record = BotManager::Instance().FindBot(candidate.characterGuid);
+        if (!record || !record->random || record->lifecycle == BotLifecycle::Removing ||
+            !record->masterGuid.IsEmpty() || IsPinnedGuid(guid) ||
+            sLFTMgr.IsQueued(candidate.characterGuid) || sLFTMgr.IsInOffer(candidate.characterGuid) ||
+            !BotActivityLeaseManager::Instance().IsAvailableForBackground(guid)) continue;
+        Player* player = sObjectAccessor.FindPlayerNotInWorld(candidate.characterGuid);
+        if (player && (!player->GetSession() || player->GetSession()->HasNetworkTransport() ||
+            player->IsBeingTeleported() || player->IsInCombat() || player->GetGroup() ||
+            player->InBattleGround() || player->InBattleGroundQueue() || player->GetTransport() ||
+            player->IsTaxiFlying() || (player->GetMap() && player->GetMap()->IsDungeon()))) continue;
+        if (BotManager::Instance().RemoveBot(candidate.characterGuid, true)) ++removed;
+    }
 }
 
 // Deterministic allowed team from all cached candidates for this account.
@@ -364,11 +630,30 @@ RandomBotService::AutoCreateCharResult RandomBotService::TryCreateCharacterOnAcc
         CharacterCreateOutcome outcome = CharacterCreation::CreateCharacter(accountId, info);
         if (outcome.result == CHAR_CREATE_SUCCESS)
         {
+            if (race == RACE_GOBLIN)
+            {
+                CharacterDatabase.PExecute(
+                    "UPDATE characters SET map = 1, zone = 14, position_x = -618.518, position_y = -4251.67, position_z = 38.718, orientation = 0 WHERE guid = '%u'",
+                    outcome.guid.GetCounter());
+                CharacterDatabase.PExecute(
+                    "REPLACE INTO character_homebind (guid, map, zone, position_x, position_y, position_z) VALUES ('%u', 1, 14, -618.518, -4251.67, 38.718)",
+                    outcome.guid.GetCounter());
+            }
+            else if (race == RACE_HIGH_ELF)
+            {
+                CharacterDatabase.PExecute(
+                    "UPDATE characters SET map = 0, zone = 12, position_x = -8949.95, position_y = -132.493, position_z = 83.5312, orientation = 0 WHERE guid = '%u'",
+                    outcome.guid.GetCounter());
+                CharacterDatabase.PExecute(
+                    "REPLACE INTO character_homebind (guid, map, zone, position_x, position_y, position_z) VALUES ('%u', 0, 12, -8949.95, -132.493, 83.5312)",
+                    outcome.guid.GetCounter());
+            }
+
             m_candidates.push_back({accountId, outcome.guid});
             m_ageMs.push_back(0);
             m_strategyAgeMs.push_back(0);
             m_randomizeAgeMs.push_back(0);
-            sLog.outString("TortoiseBots: auto-create created character %s (%s) race %u class %u on account %u",
+            TB_LOG_DETAIL("TortoiseBots: auto-create created character %s (%s) race %u class %u on account %u",
                 norm.c_str(), outcome.guid.GetString().c_str(), uint32(race), uint32(cls), accountId);
             return AutoCreateCharResult::Success;
         }
@@ -405,7 +690,7 @@ RandomBotService::AutoCreateCharResult RandomBotService::TryCreateCharacterOnAcc
         }
         if (outcome.result == CHAR_CREATE_ACCOUNT_LIMIT || outcome.result == CHAR_CREATE_SERVER_LIMIT)
         {
-            sLog.outString("TortoiseBots: auto-create account %u at limit (%u), excluding from auto-create", accountId, uint32(outcome.result));
+            TB_LOG_DETAIL("TortoiseBots: auto-create account %u at limit (%u), excluding from auto-create", accountId, uint32(outcome.result));
             return AutoCreateCharResult::Permanent;
         }
         if (outcome.result == CHAR_CREATE_DISABLED)
@@ -432,18 +717,14 @@ RandomBotService::AutoCreateCharResult RandomBotService::TryCreateCharacterOnAcc
 
 bool RandomBotService::TryAutoCreate()
 {
-    if (!sPlayerbotAIConfig.randomBotAutoCreate)
+    if (!sPlayerbotAIConfig.randomBotAutoCreate || !BotManager::HasRandomAdmissionCapacity())
         return false;
     if (!m_initialized || !sPlayerbotAIConfig.enabled)
         return false;
     if (sWorld.IsShutdowning())
         return false;
 
-    // Snapshot DesiredTargetCount once at Initialize when auto-create is
-    // enabled; repeated cadence calls must not re-roll time()%range or ratchet
-    // m_targetCount toward MaxRandomBots. m_targetCount is the stable target.
-    // Handles bounds via Desired at Initialize and deficit via size check below;
-    // non-auto path still uses TargetCount() snapshot in Initialize.
+    // Reconciliation chooses a stable desired target before this bounded attempt.
     uint32 desired = m_targetCount;
     if (!desired)
         return false;
@@ -519,7 +800,7 @@ bool RandomBotService::TryAutoCreate()
                 if (std::find(m_rndBotAccountIds.begin(), m_rndBotAccountIds.end(), pendingId) == m_rndBotAccountIds.end())
                     m_rndBotAccountIds.push_back(pendingId);
                 else
-                    sLog.outString("TortoiseBots: auto-create pending account %s (%u) already in pool, proceeding to character",
+                    TB_LOG_DETAIL("TortoiseBots: auto-create pending account %s (%u) already in pool, proceeding to character",
                         resolvedName.c_str(), pendingId);
                 AutoCreateCharResult pendingRes = TryCreateCharacterOnAccount(pendingId, validAll);
                 if (pendingRes == AutoCreateCharResult::Success)
@@ -653,7 +934,7 @@ bool RandomBotService::TryAutoCreate()
                 newAccountId = id;
                 newUsername = username;
                 m_rndBotAccountIds.push_back(id);
-                sLog.outString("TortoiseBots: auto-create created RNDBOT account %s (%u)", username.c_str(), id);
+                TB_LOG_DETAIL("TortoiseBots: auto-create created RNDBOT account %s (%u)", username.c_str(), id);
             }
             else
             {
@@ -733,14 +1014,14 @@ void RandomBotService::ResolvePinnedBots()
         std::unique_ptr<QueryResult> result(CharacterDatabase.PQuery("SELECT guid FROM characters WHERE name = '%s' LIMIT 1", escaped.c_str()));
         if (!result)
         {
-            sLog.outString("TortoiseBots: pinned bot '%s' was not found or the lookup failed (no retry until restart)", rawName.c_str());
+            TB_LOG_DETAIL("TortoiseBots: pinned bot '%s' was not found or the lookup failed (no retry until restart)", rawName.c_str());
             continue;
         }
         Field* fields = result->Fetch();
         uint32 guidLow = fields[0].GetUInt32();
         if (!guidLow)
         {
-            sLog.outString("TortoiseBots: pinned bot '%s' resolved to invalid guid", rawName.c_str());
+            TB_LOG_DETAIL("TortoiseBots: pinned bot '%s' resolved to invalid guid", rawName.c_str());
             continue;
         }
         // Bounded, resolution-only check: a name that exists in `characters`
@@ -756,18 +1037,18 @@ void RandomBotService::ResolvePinnedBots()
             }
         if (!inPool)
         {
-            sLog.outString("TortoiseBots: pinned bot '%s' (guid %u) not in RNDBOT pool, ignoring", rawName.c_str(), guidLow);
+            TB_LOG_DETAIL("TortoiseBots: pinned bot '%s' (guid %u) not in RNDBOT pool, ignoring", rawName.c_str(), guidLow);
             continue;
         }
         m_pinnedGuids.insert(guidLow);
-        sLog.outString("TortoiseBots: pinned bot '%s' resolved to guid %u", rawName.c_str(), guidLow);
+        TB_LOG_DETAIL("TortoiseBots: pinned bot '%s' resolved to guid %u", rawName.c_str(), guidLow);
     }
 
     m_pinnedResolved = true;
     if (m_pinnedGuids.empty())
-        sLog.outString("TortoiseBots: no pinned bots resolved from %u configured names", static_cast<uint32>(sPlayerbotAIConfig.pinnedBotNames.size()));
+        TB_LOG_BASIC("TortoiseBots: no pinned bots resolved from %u configured names", static_cast<uint32>(sPlayerbotAIConfig.pinnedBotNames.size()));
     else
-        sLog.outString("TortoiseBots: %u pinned bot(s) cached", static_cast<uint32>(m_pinnedGuids.size()));
+        TB_LOG_BASIC("TortoiseBots: %u pinned bot(s) cached", static_cast<uint32>(m_pinnedGuids.size()));
 }
 
 void RandomBotService::OnHumanLogin()
@@ -776,7 +1057,7 @@ void RandomBotService::OnHumanLogin()
     if (m_initialized && sPlayerbotAIConfig.randomBotAutologin && !m_started)
     {
         m_started = true;
-        sLog.outString("TortoiseBots: native random-bot service started after a human login");
+        TB_LOG_BASIC("TortoiseBots: native random-bot service started after a human login");
     }
 }
 
@@ -819,7 +1100,7 @@ void RandomBotService::RemoveExpiredBots(uint32_t diff)
         if (m_ageMs[i] < limit)
             continue;
 
-        sLog.outString("TortoiseBots: native random bot %s reached its online lifetime; removing",
+        TB_LOG_DETAIL("TortoiseBots: native random bot %s reached its online lifetime; removing",
             candidate.characterGuid.GetString().c_str());
         BotManager::Instance().RemoveBot(candidate.characterGuid, true);
         BotActivityLeaseManager::Instance().Release(candidate.characterGuid.GetCounter(), BotActivity::Grinding);
@@ -844,10 +1125,14 @@ void RandomBotService::MaintainOnlinePool()
 
     uint32 online = 0;
     for (Candidate const& candidate : m_candidates)
-        if (BotManager::Instance().IsRandomBot(candidate.characterGuid))
-            ++online;
+    {
+        auto* record = BotManager::Instance().FindBot(candidate.characterGuid);
+        if (record && record->random && record->lifecycle != BotLifecycle::Removing) ++online;
+    }
 
-    if (online >= m_targetCount || m_candidates.empty())
+    if (online > m_targetCount)
+        RemoveSurplusBots(online);
+    if (online >= m_targetCount || m_candidates.empty() || !BotManager::HasRandomAdmissionCapacity())
         return;
 
     uint32 perInterval = sPlayerbotAIConfig.randomBotsMaxLoginsPerInterval;
@@ -893,7 +1178,7 @@ void RandomBotService::MaintainOnlinePool()
             {
                 ++online;
                 ++added;
-                sLog.outString("TortoiseBots: pinned random bot %s queued on account %u (prioritized)",
+                TB_LOG_DETAIL("TortoiseBots: pinned random bot %s queued on account %u (prioritized)",
                     pinnedCandidate->characterGuid.GetString().c_str(), pinnedCandidate->accountId);
             }
             else
@@ -930,7 +1215,7 @@ void RandomBotService::MaintainOnlinePool()
         {
             ++online;
             ++added;
-            sLog.outString("TortoiseBots: native random bot %s queued on account %u",
+            TB_LOG_DETAIL("TortoiseBots: native random bot %s queued on account %u",
                 candidate.characterGuid.GetString().c_str(), candidate.accountId);
         }
         else
@@ -966,14 +1251,62 @@ void RandomBotService::UpdateMaintenance(uint32_t elapsed)
         if (!record || !record->enteredWorld || record->lifecycle != BotLifecycle::InWorld || !player)
             continue;
 
-        // Recovery/expired-value work stays on the world thread and is bounded
-        // by the configured service cadence rather than a second AI loop.
-        sRandomBotFacade.ProcessBot(player);
-        // Recovery may change lifecycle/map ownership. Resolve again before
-        // using the Player or record for later maintenance in this slice.
-        record = BotManager::Instance().FindBot(candidate.characterGuid);
-        player = sObjectAccessor.FindPlayer(candidate.characterGuid);
-        if (!record || !record->enteredWorld || record->lifecycle != BotLifecycle::InWorld || !player) continue;
+        // Auto-created characters start at the core's creation level. The
+        // administrative initializer was previously the only caller of
+        // PlayerbotFactory::Randomize, so level-range settings had no effect
+        // on the autonomous pool. Initialize eligible bots once, recording
+        // the durable "level" value in RandomBotFacade. The maintenance
+        // budget bounds this expensive work rather than doing it on login.
+        uint32 const guidLow = player->GetGUIDLow();
+        if (sPlayerbotAIConfig.instantRandomize &&
+            !sRandomBotFacade.GetValue(guidLow, "level") &&
+            m_initializedThisRun.find(guidLow) == m_initializedThisRun.end() &&
+            sRandomBotFacade.InitializeBot(player))
+        {
+            m_initializedThisRun.insert(guidLow);
+            if (player->GetItemByPos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_MAINHAND))
+                sRandomBotFacade.SetValue(guidLow, "equipment_ready", 1);
+            // Continue this bot's setup now; do not wait for a population-wide
+            // cursor cycle before initial placement.
+        }
+
+        // Repair only autonomous, initialized bots. Never reroll their level,
+        // talents or earned gear to recover the empty-cache deployment.
+        auto* ai = PlayerbotAIStorage::Instance().GetAI(player);
+        bool const eligible = sRandomBotFacade.GetValue(guidLow, "level") && ai &&
+            BotManager::Instance().IsControllableBot(player) && player->GetSession() &&
+            player->GetSession()->IsHeadless() && !player->GetSession()->isLogingOut() &&
+            player->IsAlive() && !player->IsBeingTeleported() && !player->IsInCombat() &&
+            !player->GetGroup() && !player->InBattleGround() && !player->InBattleGroundQueue() &&
+            !player->IsTaxiFlying() && !ai->HasActivePlayerMaster() && !ai->IsInRealGuild() &&
+            !IsPinnedGuid(guidLow) && BotActivityLeaseManager::Instance().IsAvailableForBackground(guidLow);
+        if (eligible && !sRandomBotFacade.GetValue(guidLow, "equipment_ready"))
+        {
+            bool const equipped = player->GetItemByPos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_MAINHAND) &&
+                (player->GetItemByPos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_CHEST) ||
+                 player->GetItemByPos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_LEGS));
+            if (equipped || sRandomBotFacade.UpdateGearSpells(player))
+            {
+                sRandomBotFacade.SetValue(guidLow, "equipment_ready", 1);
+                sRandomBotFacade.SetValue(guidLow, "seeded", 1);
+                player->SaveToDB();
+            }
+            else
+                continue; // Incomplete gear must remain pending.
+        }
+        if (eligible && player->GetLevel() >= 10 &&
+            !sRandomBotFacade.GetValue(guidLow, "initial_placement"))
+        {
+            if (BotManager::Instance().RelocateRandomBot(player, RandomBotDestination::Level))
+                sRandomBotFacade.SetValue(guidLow, "initial_placement", 1);
+            continue;
+        }
+
+        // ProcessBot is optional expired-value/background cleanup. Its
+        // near-human refusal must not prevent pending initialization, gear
+        // recovery or initial placement above from ever completing.
+        if (!sRandomBotFacade.ProcessBot(player))
+            continue;
 
         uint32 strategyInterval = sPlayerbotAIConfig.minRandomBotChangeStrategyTime;
         if (sPlayerbotAIConfig.maxRandomBotChangeStrategyTime > strategyInterval)
@@ -999,8 +1332,8 @@ void RandomBotService::UpdateMaintenance(uint32_t elapsed)
                 player->GetTotalPlayedTime(), sRandomBotFacade.GetValue(timerGuidLow, "seeded"));
             if (player->GetLevel() >= 5 && freshTimerBot)
             {
-                sRandomBotFacade.UpdateGearSpells(player);
-                sRandomBotFacade.SetValue(timerGuidLow, "seeded", 1);
+                if (sRandomBotFacade.UpdateGearSpells(player))
+                    sRandomBotFacade.SetValue(timerGuidLow, "seeded", 1);
             }
             m_randomizeAgeMs[i] = 0;
         }
@@ -1012,9 +1345,23 @@ void RandomBotService::Update(uint32_t diff)
     if (!m_initialized || !sPlayerbotAIConfig.enabled)
         return;
 
+    if (m_resetFailed)
+        return;
+    if (m_resetPending)
+    {
+        m_serviceElapsedMs += diff;
+        if (m_serviceElapsedMs >= std::max<uint32_t>(100, sPlayerbotAIConfig.randomBotUpdateInterval))
+        {
+            m_serviceElapsedMs = 0;
+            ProgressAccountReset();
+        }
+        return;
+    }
+
+    ProcessAdminActions();
     sRandomBotFacade.RefreshAuctionPrices(diff);
 
-    uint32_t cadence = std::max<uint32_t>(1000, sPlayerbotAIConfig.randomBotUpdateInterval);
+    uint32_t cadence = std::max<uint32_t>(100, sPlayerbotAIConfig.randomBotUpdateInterval);
     m_serviceElapsedMs += diff;
     if (m_serviceElapsedMs < cadence)
         return;
@@ -1022,11 +1369,19 @@ void RandomBotService::Update(uint32_t diff)
     uint32_t elapsed = m_serviceElapsedMs;
     m_serviceElapsedMs = 0;
 
-    // Bounded auto-create: up to 5 creations per cadence if progressing toward target
+    m_activity.Update(m_humanSessions ? sPlayerbotAIConfig.diffWithPlayer :
+        sPlayerbotAIConfig.diffEmpty, sWorld.GetAverageDiff(), elapsed / 1000.0);
+    RefreshPopulationTarget();
+
+    // Native creation is bounded by count and elapsed time; a short configured
+    // cadence must not be silently clamped to a one-second bottleneck.
     if (sPlayerbotAIConfig.randomBotAutoCreate)
     {
-        for (int i = 0; i < 5; ++i)
+        uint32 const creationStarted = WorldTimer::getMSTime();
+        for (uint32 i = 0; i < sPlayerbotAIConfig.randomBotsMaxCreatesPerInterval; ++i)
         {
+            if (i && WorldTimer::getMSTimeDiff(creationStarted, WorldTimer::getMSTime()) >=
+                sPlayerbotAIConfig.randomBotCreationBudgetMs) break;
             if (!TryAutoCreate())
                 break;
         }
@@ -1056,6 +1411,8 @@ void RandomBotService::Shutdown()
         BotActivityLeaseManager::Instance().Release(candidate.characterGuid.GetCounter(), BotActivity::Grinding);
     }
 
+    m_adminRequests.clear();
+    m_adminKeys.clear();
     m_started = false;
     m_initialized = false;
     m_pinnedGuids.clear();
@@ -1070,6 +1427,11 @@ void RandomBotService::Shutdown()
     m_pendingNextRetry = 0;
     m_pendingSince = 0;
     m_pendingStaleLogged = false;
+    m_resetPending = false;
+    m_resetFailed = false;
+    m_nextResetAccount = 0;
+    m_resetAccountIds.clear();
+    m_initializedThisRun.clear();
 }
 
 } // namespace TortoiseBots

@@ -98,6 +98,7 @@ namespace ai
     class ChatCommandAction : public Action
     {
     public:
+        bool RequiresWorldOwner() const override { return true; }
         ChatCommandAction(PlayerbotAI* ai, std::string name, uint32 duration = sPlayerbotAIConfig.reactDelay) : Action(ai, name, duration) {}
     public:
         virtual bool Execute(Event& event) override { return true; }

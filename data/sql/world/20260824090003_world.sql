@@ -1,3 +1,2 @@
--- Remove the obsolete donor RPG cache that was created by the original
--- module migration. No active TortoiseBots source reads or writes this table.
-DROP TABLE IF EXISTS `ai_playerbot_rpg_races`;
+-- Legacy ManTech tables are retained for state import and rollback.
+-- Cleanup is deliberately excluded from automatic module migration.

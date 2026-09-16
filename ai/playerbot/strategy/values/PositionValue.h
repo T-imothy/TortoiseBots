@@ -1,4 +1,5 @@
 #pragma once
+#include "playerbot/strategy/WorldCalculatedValue.h"
 #include "playerbot/PlayerbotAI.h"
 #include "playerbot/strategy/AiObjectContext.h"
 #include "playerbot/strategy/Value.h"
@@ -54,10 +55,17 @@ namespace ai
         virtual WorldPosition Calculate() override { return WorldPosition(bot); };
     };
 
-    class MasterPositionValue : public MemoryCalculatedValue<WorldPosition>
+    class MasterTeleportingValue : public WorldCalculatedValue<bool>
     {
     public:
-        MasterPositionValue(PlayerbotAI* ai, std::string name = "master position", uint32 checkInterval = 1) : MemoryCalculatedValue<WorldPosition>(ai, name, checkInterval) { minChangeInterval = 1; };
+        MasterTeleportingValue(PlayerbotAI* ai) : WorldCalculatedValue<bool>(ai, "master teleporting", 1) {}
+        bool Calculate() override { Player* master = GetMaster(); return master && master->IsBeingTeleported(); }
+    };
+
+    class MasterPositionValue : public WorldCalculatedValue<WorldPosition, MemoryCalculatedValue<WorldPosition>>
+    {
+    public:
+        MasterPositionValue(PlayerbotAI* ai, std::string name = "master position", uint32 checkInterval = 1) : WorldCalculatedValue<WorldPosition, MemoryCalculatedValue<WorldPosition>>(ai, name, checkInterval) { minChangeInterval = 1; };
         virtual bool EqualToLast(WorldPosition value) override { return value.fDist(lastValue) < sPlayerbotAIConfig.proximityDistance; }
         virtual WorldPosition Calculate() override { Player* master = GetMaster();  if (master) return WorldPosition(master); return WorldPosition(); };
     };

@@ -18,9 +18,12 @@ This document provides an honest, authoritative record of current architectural 
 1. **Self-Bot (Controlling Your Own Character as a Bot):**
    - No Network-session attach seam exists in the core server.
    - Native PlayerAI is not a control seam; converting a Network session into a Headless session mid-connection would violate session integrity.
-2. **Synthetic Auction Market (Empty Market Population):**
-   - Personal bot auction posting and bidding works using real bot inventories.
-   - Full synthetic market seeding (server-generated trade goods out of thin air) requires a dedicated core snapshot seam (`MarketPost`/`Bid`/`Expire`).
+2. **Auction Controller Selection:**
+   - ManTech's CMaNGOS controller supports synthetic market seeding through native
+     auction ownership, posting, expiry and mail contracts after map jobs join.
+   - AhMarketUseCMaNGOS selects this controller exclusively; local startup and its
+     30 eligible owners were verified with the populated travel cache. Actual
+     player trading and production-scale market acceptance remain separate tests.
 3. **Early Loot Admission Check:**
    - The core currently lacks a pre-movement `CanLoot` query, so bots may occasionally approach a corpse before discovering it has no valid personal loot slot.
 

@@ -1,3 +1,4 @@
+#include "runtime/BotWorldActions.h"
 
 #include "playerbot/playerbot.h"
 #include "playerbot/LootObjectStack.h"
@@ -26,6 +27,9 @@ inline std::string GetTravelPurposeName(std::string purpose)
 
 bool ChooseTravelTargetAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
+
     TravelTarget* travelTarget = AI_VALUE(TravelTarget*, "travel target");
 
     if(travelTarget->GetStatus() != TravelStatus::TRAVEL_STATUS_PREPARE)
@@ -44,10 +48,23 @@ bool ChooseTravelTargetAction::Execute(Event& event)
         return false;
     }
 
-    if (futureDestinations->wait_for(std::chrono::seconds(0)) == std::future_status::timeout)
+    if (IsTravelSearchPending(*futureDestinations))
         return false;
 
-    PartitionedTravelList destinationList = futureDestinations->get();
+    PartitionedTravelList destinationList;
+    try
+    {
+        destinationList = futureDestinations->get();
+    }
+    catch (const std::exception& error)
+    {
+        // The failed future is consumed. Leave PREPARE through the native retry
+        // path instead of throwing through the owning map's update barrier.
+        sLog.outError("Playerbot travel search failed for bot %u: %s", bot->GetGUIDLow(), error.what());
+        travelTarget->SetStatus(TravelStatus::TRAVEL_STATUS_NONE);
+        context->ClearValues("no active travel destinations");
+        return false;
+    }
 
     travelTarget->SetStatus(TravelStatus::TRAVEL_STATUS_NONE);
 
@@ -364,11 +381,34 @@ bool ChooseTravelTargetAction::SetBestTarget(Player* requester, TravelTarget* ta
             {
                 // Checked after IsActive so the area lookup only happens for
                 // the point that was actually selected.
-                if (!target->IsForced() && position && position->IsEnemyHomeZoneFor(bot->GetTeam()))
+                if (!target->IsForced() && position)
                 {
-                    ai->TellDebug(requester, "Skipping " + destination->GetTitle() + " - enemy home zone", "debug travel");
+                    if (position->IsEnemyHomeZoneFor(bot->GetTeam()))
+                    {
+                        ai->TellDebug(requester, "Skipping " + destination->GetTitle() + " - enemy home zone", "debug travel");
+                        continue;
+                    }
 
-                    continue;
+                    AreaTableEntry const* area = position->GetArea();
+                    uint32 zoneId = area ? (area->ZoneId ? area->ZoneId : area->Id) : 0;
+                    if (zoneId == 5536 || zoneId == 5225)
+                    {
+                        ai->TellDebug(requester, "Skipping " + destination->GetTitle() + " - custom starting zone", "debug travel");
+                        continue;
+                    }
+
+                    int32 posAreaLevel = position->GetAreaLevel();
+                    if (posAreaLevel > 0 && posAreaLevel > (int32)bot->GetLevel() + 5)
+                    {
+                        ai->TellDebug(requester, "Skipping " + destination->GetTitle() + " - area level too high", "debug travel");
+                        continue;
+                    }
+
+                    if (bot->GetLevel() <= 5 && position->distance(bot) > 1500.0f)
+                    {
+                        ai->TellDebug(requester, "Skipping " + destination->GetTitle() + " - too far for starting level", "debug travel");
+                        continue;
+                    }
                 }
 
                 if (partition != std::prev(partitionedList.end())->first && !urand(0, 10)) //10% chance to skip to a longer partition.
@@ -487,6 +527,9 @@ DestinationList ChooseTravelTargetAction::FindDestination(PlayerTravelInfo info,
 
 bool ChooseGroupTravelTargetAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
+
     std::vector<ObjectGuid> groupPlayers;
 
     Group* group = bot->GetGroup();
@@ -606,6 +649,9 @@ bool ChooseGroupTravelTargetAction::isUseful()
 
 bool RefreshTravelTargetAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
+
     TravelTarget* target = AI_VALUE(TravelTarget*, "travel target");
 
     TravelDestination* oldDestination = target->GetDestination();
@@ -692,6 +738,9 @@ bool RefreshTravelTargetAction::isUseful()
 
 bool ResetTargetAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
+
     TravelTarget* oldTarget = AI_VALUE(TravelTarget*, "travel target");
 
     context->ClearValues("no active travel destinations");
@@ -724,6 +773,12 @@ bool ResetTargetAction::isUseful()
 
 bool RequestTravelTargetAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
+
+    if (IsTravelSearchPending(*AI_VALUE(FutureDestinations*, "future travel destinations")))
+        return false;
+
     TravelDestinationPurpose actionPurpose = TravelDestinationPurpose(stoi(getQualifier()));
 
     WorldPosition center = event.GetOwner() ? event.GetOwner() : (GetMaster() ? GetMaster() : bot);
@@ -741,6 +796,9 @@ bool RequestTravelTargetAction::Execute(Event& event)
 }
 
 bool RequestTravelTargetAction::isUseful() {
+    if (IsTravelSearchPending(*AI_VALUE(FutureDestinations*, "future travel destinations")))
+        return false;
+
     if (bot->InBattleGround())
         return false;
 
@@ -806,6 +864,12 @@ bool RequestTravelTargetAction::isAllowed() const
 
 bool RequestNamedTravelTargetAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
+
+    if (IsTravelSearchPending(*AI_VALUE(FutureDestinations*, "future travel destinations")))
+        return false;
+
     std::string travelName = getQualifier();
 
     WorldPosition center = event.GetOwner() ? event.GetOwner() : (GetMaster() ? GetMaster() : bot);
@@ -1357,6 +1421,12 @@ bool RequestNamedTravelTargetAction::isAllowed() const
 
 bool RequestQuestTravelTargetAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
+
+    if (IsTravelSearchPending(*AI_VALUE(FutureDestinations*, "future travel destinations")))
+        return false;
+
     WorldPosition center = event.GetOwner() ? event.GetOwner() : (GetMaster() ? GetMaster() : bot);
 
     ai->TellDebug(ai->GetMaster(), "Getting new destination ranges for travel quest", "debug travel");
@@ -1424,7 +1494,12 @@ bool RequestQuestTravelTargetAction::Execute(Event& event)
             // Quadratic in level, so a level 20 bot searches thirty times further
             // than a level 1 one. The quest giver a bot has to walk back to is by
             // definition inside its own zone, whatever its level.
-            destinationFetches.push_back({ flag, questId, std::max(5000.f, 1000.f + (bot->GetLevel() * bot->GetLevel()) * 75.f) });
+            float questRange = 1000.f + (bot->GetLevel() * bot->GetLevel()) * 75.f;
+            if (bot->GetLevel() > 5)
+                questRange = std::max(5000.f, questRange);
+            else
+                questRange = std::min(1500.f, questRange);
+            destinationFetches.push_back({ flag, questId, questRange });
 
             if (onlyClassQuest && destinationFetches.size() > 1) //Only do class quests if we have any.
             {
@@ -1519,7 +1594,10 @@ bool RequestQuestTravelTargetAction::Execute(Event& event)
             }
 
             if (list.empty())
-                list = sTravelMgr.GetPartitions(center, partitions, travelInfo, (uint32)TravelDestinationPurpose::QuestGiver);
+            {
+                float questGiverRange = (travelInfo.GetLevel() <= 5) ? 1500.0f : ((travelInfo.GetLevel() <= 10) ? 3000.0f : 10000.0f);
+                list = sTravelMgr.GetPartitions(center, partitions, travelInfo, (uint32)TravelDestinationPurpose::QuestGiver, {}, true, questGiverRange);
+            }
 
             return list;
         }

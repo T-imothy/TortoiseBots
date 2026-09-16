@@ -1560,3 +1560,850 @@ starving a cohort. It retains this module's native RandomBotService and recovery
 actions. ModulePopulationMaintenanceTest executes the selected implementation
 with 6,000 fixtures, time/count budgets, fair wraparound, deferred timers and
 removal during recovery. Fixture scale is not a live performance measurement.
+
+
+## 2026-09-12 ManTech persistence, population and native-role checkpoint
+
+Source: preserved `mantech-turtle` baseline
+`37aee50d6bfbf9194dd5e3c79a156d9bfcb4f569`, existing TortoiseBots facade/services,
+and native core Player/HeadlessSession/LFT contracts. The changes adapt their
+outcomes behind module hooks; they do not restore embedded-core PlayerBots.
+
+- Durable facade values, legacy import preservation and atomic trade-discount
+  cache/write ordering replace process-only state.
+- Cadence target reconciliation, bounded surplus removal and DB queue admission
+  headroom retain protected activity and one native lifecycle owner.
+- Native role hooks and exclusive LFT fill avoid concurrent population controllers.
+- A real isolated startup crash resolved to `PlayerbotAIStorage::GetAI` called
+  by native machine-driven classification in `Player::Player`. Pointer lookup
+  now requires only registry identity, never uninitialized player update fields.
+- 82/82 architecture regressions passed (7.01 seconds), including actual selected
+  module persistence/population/role/identity fragments. Release SOAP-on/LTO-on
+  candidate build passed. SQL fixtures cover migration/replay. These tests do not
+  certify parallel AI lifetime safety, live travel/BG behavior or production load.
+
+
+## 2026-09-12 lifecycle and diagnostic follow-up
+
+The isolated native module tests passed pending-add cancellation, login, save,
+logout, re-login and final cleanup. Both module-enabled and disabled worlds reached
+ready and shut down with exit 0. A deliberately connection-limited test DB now
+causes clean expected startup failure instead of the earlier partial-pool crash.
+
+The baseline PerformanceMonitor string-view API and `.perfmon` behavior are adapted
+to this optional module. Added registry/counter locking, snapshots before report
+output, 64-bit counters, monotonic timing, lazy bucket creation and balanced recursive
+scopes. The native command registry retains authorization. Actual-source concurrent
+counter/reset/report and command tests pass: 83/83 core regressions, 6.87 seconds.
+The Windows wiring validator now normalizes path separators; its existing audited
+dead-file classification produces 0 live missing creators rather than false errors.
+The surface gate now requires preserved legacy tables and the one-time value import.
+
+
+## 2026-09-12 active behavior and shared-state ports
+
+Source contracts: preserved ManTech baseline
+`37aee50d6bfbf9194dd5e3c79a156d9bfcb4f569`, the selected TortoiseBots implementation,
+and native core Map/GameObject/Player/session/command APIs. No new donor checkout
+or unpinned remote behavior was imported.
+
+Baseline fixes now execute in the selected module: exception-safe travel permits,
+nonblocking travel reset and failed-result retry, 30-second pet-storage lookup
+cache, Arathi GO-entry eligibility and per-AI capture throttle, corrected RPG
+navigation endpoints and stale-target rejection, one-pass crowd occupancy, and
+the broadcast-disable setting. Deferred travel preserves the module's existing
+configuration. Native core has no waypoint-pause API; no no-op shim is claimed
+as working NPC pause behavior.
+
+Independent adaptations include packet snapshot dispatch/reentrant recovery,
+stable shared-value owner and synchronization, GUID/generation objective caches,
+one-time shared lookup publication, observability synchronization, and bounded
+random-bot administration through the native module command registry and service.
+
+Validation: 89 architecture tests passed after moving 20 existing source fragments
+from the retired tree to selected-module implementations. Tests cover actual
+native fragments plus deterministic fixtures; they do not establish parallel AI
+ownership or client gameplay acceptance. A prior build sustained 30 native bots
+for 120 seconds and shut down cleanly in the isolated database fixture.
+
+
+The selected module already had ActionFailureBackoff and TransitionTracker;
+the ManTech retry preservation adapts those native classes instead of importing
+a second cache. Engine now evaluates prerequisites and possibility before
+delaying failed background execution, keeps alternatives available, and clears
+stale state on native map-work generation or current-power changes. Explicit
+commands remain immediate. BotRetryIntegrationTest now executes the module's
+actual Engine methods and cache; ModuleFailureBackoffTest exercises the native
+header. The structural gate test was updated deliberately to match the user's
+required baseline behavior. 90/90 architecture regressions passed in 8.14 seconds.
+
+
+The capability/BG source audit also restored the baseline unknown-spell-data
+guard, native map-template battleground classification, and proactive PvP after
+noncombat strategy resets. NativeSpellCapabilityTest, ThornBotDiagnosticsTest's
+map classification, and BattlegroundPlayerPresentationTest's factory fragment
+now select the module. These repairs close source-level preservation gaps;
+client combat/objective acceptance remains separate.
+
+
+Objective memory uses the existing per-AI value context, shared by all BGTactics
+action instances. Review found that action-local fields could disagree when
+select/check/move actions ran on the same bot; ModuleBgObjectiveLifetimeTest now
+explicitly covers shared same-AI identity as well as independent maps and bots.
+The state retains only GUID, native map-work generation and selection time.
+
+### Owner-deferred outgoing reactions and packet lifetime fence (2026-09-12)
+
+- Feature: move existing outgoing spell, knockback, emote and chat reactions into
+  the owning AI update; prevent enqueue from using an AI after registry removal.
+- Source repository: current T-imothy/TortoiseBots migration working tree; native
+  map generation contract from T-imothy/tortoise-wow ManTech baseline
+  `37aee50d6bfbf9194dd5e3c79a156d9bfcb4f569`.
+- Source files: PlayerbotAI.cpp/.h, runtime/PlayerbotAIStorage.cpp/.h and
+  host/BotPacketAdapter.cpp; native Player::GetMapWorkGeneration.
+- Independently implemented module queue/fence around existing reaction bodies;
+  no donor tree or new core API copied. The existing action packet queues do not
+  cover these formerly immediate callbacks, hence the narrow owner FIFO.
+- Local validation: 91 architecture tests passed, including concurrent producer,
+  reentrancy, malformed event, map-transfer and removal fencing cases. Runtime
+  evidence and remaining parallel ownership limitations are tracked separately.
+
+
+### Per-AI delayed reply mailbox (2026-09-12)
+
+- Feature: discard optional asynchronous replies after the originating AI ends.
+- Source repository/files: current T-imothy/TortoiseBots working tree,
+  PlayerbotAI.cpp/.h, SayAction.cpp and BotManager.cpp.
+- Independently reimplemented the queue/lifetime boundary with standard weak
+  ownership; existing native session opcode processing and chat filtering retained.
+- Reason: a durable character GUID cannot distinguish successive AI lifetimes;
+  the private native login request token is not a public module contract.
+- Validation: native worker/drain regression added; 92 architecture tests pass.
+  No live LLM endpoint was exercised.
+
+### Preserved reply dataset and missing-category handling (2026-09-12)
+
+- Feature: baseline reply catalog, probability defaults and safe absent-category lookup.
+- Source repository: T-imothy/tortoise-wow.
+- Source commit: `8415f1b9dc079f7207cfaf8589fa135ce19a1ada` (catalog's recorded commit).
+- Source file: modules/mod-playerbots/sql/world/ai_playerbot_texts.sql.
+- Source SHA-256: `8ab073b910b5245bffd18fc1f5c2f860992bc8ee9c662ba519fee9faa978a221`.
+- Ported data: 1,937 reply rows and three probability defaults, GPL-2.0-or-later.
+  Destructive donor DDL and generated help graphs omitted. The native module schema
+  is retained; temporary staging makes additive seeding repeatable and preserves
+  operator customization. Missing-category selection was independently corrected.
+- Validation: 94 architecture tests, including selected-module reply selection;
+  isolated MariaDB repeated imports preserve row counts, customized text/locales
+  and probabilities, with test edits rolled back. Native migration/runtime rerun
+  evidence is recorded in the migration checklist.
+
+### Decision and reaction exception ownership (2026-09-12)
+
+- Feature: recover the engine's active-decision flag and pending strategy rebuild
+  after a tick unwinds; release popped nodes and generated descriptors on failure.
+- Source repository/files: existing T-imothy/TortoiseBots migration working tree,
+  ai/playerbot/strategy/Engine.cpp, ReactionEngine.cpp, Queue.cpp and Action.h.
+- Independently corrected with standard C++ local ownership around existing
+  behavior. No donor files copied and no new native-core interface introduced.
+- Reason: the adapter's existing malformed-packet catch permits later ticks,
+  while manual engine cleanup previously ran only on successful return.
+- Validation: ModuleEngineRecoveryTest uses native method excerpts and injected
+  failures; exact build/runtime evidence is in the host migration checklist.
+
+
+### ManTech diagnostics, datasets and activity controller (2026-09-12)
+
+- Diagnostic source: T-imothy/tortoise-wow at
+  `00203fd8ff1de6415b546f0bf7c3babc28e69599`, preserved
+  modules/mod-playerbots/src/playerbot/BotDiagnostics.{h,cpp} and observation sites.
+  Ported bounded behavior/taxi/Thorn logging to the active module; reused native
+  predicates, spline initialization checks and diagnostic budgets. Adapted the
+  existing TravelTarget accessor; engine inspection remains const.
+- Activity source: same pinned tree, RandomPlayerbotMgr.cpp `botPIDImpl` and
+  `ScaleBotActivity`. Reimplemented the small controller within RandomBotService;
+  retained proportional/integral/derivative policy and saturation anti-windup,
+  using actual elapsed seconds and rejecting nonfinite tuning/arithmetic.
+  No lifecycle manager, worker, core tick controller or donor tree was imported.
+- Data source: T-imothy/tortoise-wow commit
+  `8415f1b9dc079f7207cfaf8589fa135ce19a1ada`; exact files, SHA-256 hashes and
+  DBC filtering are recorded in `reference/mantech-datasets.json`.
+  GPL-2.0-or-later defaults are staged in temporary tables and inserted only for
+  missing compatible keys. Operator data and unrelated classes remain untouched.
+- Help: 22 independently authored native-module topics based on active command
+  and class documentation. All internal help links resolve; old generated donor
+  help graphs were not relabeled as supported module behavior.
+- Verification: selected-module diagnostic tests, deterministic PID/command tests,
+  and real MySQL 8 replay/customization checks. Exact current build/runtime results
+  are recorded in the host migration checklist and local output reports.
+
+### ManTech random administrator initialization and relocation (2026-09-12)
+
+Source: T-imothy/tortoise-wow, preserved commit
+37aee50d6bfbf9194dd5e3c79a156d9bfcb4f569, RandomPlayerbotMgr.cpp administrative
+reset/init/teleport/rpg/grind behavior. Independently adapted to native
+RandomBotService/RandomBotFacade/BotManager ownership. Persistent reset retains
+temporary events; factory initialization retains configured level policies.
+Relocation uses validated native TravelMgr destinations and native TeleportTo;
+local grind intentionally has no global fallback. Busy/owned/leased bots are
+protected. GUID plus login generation prevents stale queue operations.
+Validation: ModulePersistentValuesTest, ModuleBotInitializationTest,
+ModuleRandomRelocationTest, ModuleRandomAdminQueueTest and command permission
+tests. Runtime validation is recorded separately; tests use extracted native
+methods with host fixtures and do not establish live-client gameplay parity.
+
+### Native diagnostics and world-buff cooldown ownership (2026-09-12)
+
+Independently adapted within TortoiseBots from the current module implementation
+at 0fb3bc0bff08f5a47d8f6c3e3fc2a9528f538c02 plus the preserved working changes.
+The engine execution log now uses its existing EnableActionLog control. World-buff
+summon cooldowns use a per-AI ManualSetValue instead of a static GUID map, preserving
+cooldown sharing between action instances and completion clearing. Native fragment
+regressions cover independent AI lifetimes, shared same-AI state and pending versus
+completed regrouping. Cross-player world-buff operations still require the joined
+world owner; this change alone does not establish parallel map safety.
+
+### Non-random social view and channel audience preservation (2026-09-12)
+
+Source: T-imothy/tortoise-wow, preserved ManTech baseline
+37aee50d6bfbf9194dd5e3c79a156d9bfcb4f569, RandomPlayerbotMgr::OnPlayerLogin,
+MovePlayerBot and PlayerbotAI::ChannelHasRealPlayer. Independently adapted to
+native Network sessions and controlled BotRecords. The view previously contained
+the autonomous pool, reversing friend/activity semantics. Channel membership now
+uses Channel::HasMember, a generic const native query, and no longer treats any
+online character as an audience or uses a layout cast. ModuleSocialPopulationTest
+covers human/owned/controlled/autonomous/offline views, stale GUID resolution,
+friend retention and channel/transport membership. This remains world-owner work.
+
+### Travel query synchronization and bounded relocation (2026-09-12)
+
+Source: active Sagiroth-derived TortoiseBots checkout at
+0fb3bc0bff08f5a47d8f6c3e3fc2a9528f538c02 plus this fork's native relocation port.
+Independently corrected TravelMgr's shared lazy area cache, after tracing current
+asynchronous GetPartitions consumers and recursive parent lookups. The native
+relocation picker now filters innkeepers before terrain probes, samples without
+replacement and validates the chosen local point's map/radius. Native-fragment
+ModuleAreaLevelCacheTest and ModuleTeleportPickerTest pass. The 102-test candidate
+ran with 30 disposable bots on shared local MySQL, restored the generated graph,
+completed RPG and grind relocation for Tbplayone and shut down cleanly; artifact
+identity and observations are in the runtime native-travel-runtime receipt.
+
+### Immutable runtime item queries (2026-09-12)
+
+Source: same active TortoiseBots checkout, RandomItemMgr.cpp. Independently changed
+runtime cache misses from mutating operator[] to const lookup with immutable empty
+values; startup builders retain ownership. This avoids inserting null item records,
+invalid spec weights and empty level/category tables during query execution.
+GetUpgradeList's <= comparator was not a strict weak ordering for equal weights;
+it now uses <. ModuleItemCacheReadTest covers eight concurrent native query callers,
+missing/populated values, unchanged nested table sizes and 64 equal-weight upgrades.
+The separate unused GetUpgrade policy has not been rewritten by this change.
+
+### Jump and queued requester lifetime (2026-09-12)
+
+Source: active Sagiroth-derived TortoiseBots checkout
+0fb3bc0bff08f5a47d8f6c3e3fc2a9528f538c02, PlayerbotAI jump/update code and
+strategy Event/Trigger/Engine/ReactionEngine; native ManTech MapWorkStamp contract.
+Independently adapted pending jump destinations to the native map generation and
+corrected the wrapping millisecond deadline. ModuleJumpLifetimeTest exercises the
+actual implementation for near/far/instance/removal invalidation, exact deadline,
+timer wrap, ordered landing packets and a two-stage fall. The 104-test candidate
+also ran 30 disposable bots, restored travel cache, completed RPG/grind relocation
+and shut down cleanly (native-jump-runtime receipt); no real client jump capture.
+
+Requester raw pointers persisted through both chat delay and external trigger
+queues. Event now captures a revocable identity shared by copies; native module
+logout/reclaim hooks invalidate it, and current ObjectAccessor lookup precedes use.
+ChatCommandHolder and packet/chat/forced triggers capture before queuing. Engines
+reject expired events before evaluation/execution, preserving automatic ownerless
+events. ModuleEventOwnerLifetimeTest compiles actual Event implementation and
+trigger/command-drain/dispatch fragments, including GUID/address reuse, logout,
+copy/assignment, delayed cancellation and concurrent capture/revocation.
+
+### Guild result checks and explicit action lifetime (2026-09-12)
+
+Source: active Sagiroth-derived TortoiseBots checkout
+0fb3bc0bff08f5a47d8f6c3e3fc2a9528f538c02; GuildAcceptAction,
+GuildManagementActions, InviteToGroupAction, Engine explicit entry points and
+PlayerbotAI::IsSafe. Compared with native GuildHandler acceptance/leave behavior
+and existing Map/WorldSession ownership. Independently corrected null/superseded
+invitation handling, observed native admission results, post-leave pointer lifetime,
+explicit action RAII and same-map/session eligibility. ModuleGuildNativeResultTest
+uses actual action bodies; ModuleEngineRecoveryTest now injects explicit command,
+query and queue failures; ModuleNativeMapSafetyTest covers membership/transport
+variants. These are deterministic native-fragment checks, not real-client guild
+or map-parallel acceptance. The prior requester-lifetime binary also passed native
+command/group/stranded-headless cleanup on verified disposable local fixtures
+(native-packet-lifetime-runtime receipt).
+
+### World action ownership and native commerce results (2026-09-12)
+
+Sources inspected: active Sagiroth-derived TortoiseBots
+0fb3bc0bff08f5a47d8f6c3e3fc2a9528f538c02 group/guild/mail/AH/trade actions;
+active Penqle-derived core 00203fd8ff1de6415b546f0bf7c3babc28e69599 native
+GroupHandler and MailHandler. Independently implemented a bounded module world
+action queue using revocable Event identities, explicit map/world scopes and the
+existing post-join BotManager removal guard. No new core hook or legacy bot coupling.
+Ported whole-action ownership boundaries and corrected observed native completion,
+COD preflight and exception cleanup errors. ModuleWorldActionsTest exercises the
+actual queue's lifetime, nested ordering, producer concurrency and bounds;
+ModuleMailNativeResultTest and ModuleGroupNativeResultTest exercise actual native
+action bodies against rejection, native mutation and lifetime fixtures. A prior
+queue candidate passed the local native packet/group/queued-action/stranded-cleanup
+runtime check (receipt native-world-action-runtime); that receipt does not certify
+later source changes or a real network client. Full map AI activation is outstanding.
+
+Guild AH purchases also use scoped ownership of the shared auction-action mutex,
+including missing-house, missing-map, empty-needs and exceptional exits.
+ModuleAuctionActionOwnerTest executes the native auction entry points with
+contention and injected native/allocation failures; future actions remain able
+to acquire the mutex after unwind.
+
+Queued world actions also capture the existing native MapWorkStamp. Work admitted
+before a near/far teleport, map/instance change or map ownership generation change
+is discarded at the world drain, even if the same Player lifetime survives.
+Admission rejects an already-transferring actor. ModuleWorldActionsTest covers
+each identity mismatch using the actual core stamp and module queue.
+
+Mail action dispatch propagates an empty/fully rejected collection as failure,
+while still running the processor's report stage for partial results. The native
+mail regression includes full rejection, empty filters and partial completion.
+
+Guild command eligibility resolves the current native guild/member slot before
+rank, permission or leader queries. Missing guild/member records fail closed;
+guild joins resolve an inviter once and require its session. Actual helper-body
+regressions cover missing guilds/members, denied rights, valid ranks and null
+players. These remain world-owner queries, not concurrent lifetime guarantees.
+
+Auction appraisal now publishes a complete immutable price snapshot atomically.
+Readers retain that snapshot while selecting/copying listings; a refresh cannot
+clear or mutate their backing storage. The one-argument query returns an owned
+vector, matching filtered queries. Publication retains the existing per-item
+64-listing bound, cheapest unit-price policy, faction filtering and native house
+deduplication. Exceptions during refresh leave the previous published view intact.
+Native source-fragment concurrency tests exercise refresh/read overlap and policy.
+
+Deferred removal now uses a coalesced, thread-safe mailbox keyed by registered
+character GUID and module record generation. Repeated requests for one incarnation
+preserve any save=true request; older incarnations cannot overwrite or remove a
+replacement login. Explicit map execution queues only intent and leaves registry,
+lease and native session mutations to the joined world owner. World AI's existing
+removal guard still marks Removing before returning. Drains run before/after the
+world AI loop, with native session stop and reclaim behavior retained. The actual
+queue and RemoveBot bodies are tested with concurrent map producers, generation
+replacement, active AI stacks, native stop states and save coalescing.
+
+Combat stuns no longer impersonate logout requests. The AI consults the native
+session logout flag and pauses while its timer is pending. The mature chat logout
+intent is consumed by BotManager outside the AI stack, with saved teardown behind
+the removal guard; logout cancel can clear an intent that has not yet been consumed.
+Native headless sessions now honor an actual elapsed logout timer on the world
+packet owner. Map packet processing and ordinary stuns cannot expire the session.
+This corrects the snapshot-candidate live fixture unexpectedly removing itself
+after login (the failed native-snapshot-packet check remains failure evidence).
+
+The existing default-off PacketBridgeTest now injects a transient stun into its
+validated disposable master fixture before the first AI tick and requires that
+the fixture survives to command testing without a native logout request. Only
+the injected state is cleared, including early cleanup. Existing real crowd
+control is left intact. This is a headless/native harness, not a network client.
+
+
+### World decision continuations (2026-09-12)
+
+Thirty social/commerce action classes now declare RequiresWorldOwner, inherited
+by their variants. Decision and reaction engines test this before isUseful,
+isPossible, multipliers, prerequisites or listeners for the selected action.
+The existing bounded BotWorldActions queue resumes the same engine walk with its
+original basket intact. Weak engine epochs cancel resets/destruction, weak request
+tokens release the pending gate on rejection/discard, and the existing actor,
+requester and MapWorkStamp checks cancel stale work. A combat/death engine change
+supersedes an autonomous continuation. Queue backpressure leaves its basket for
+retry, without manufacturing action failure or success.
+
+Explicit commands return ACTION_RESULT_DEFERRED and execute their native action
+on the joined world owner. The bool DoSpecificAction interface reports false until
+there is an actual gameplay result; it cannot be used as an admission receipt.
+Explicit execution only schedules success continuers after a successful result.
+Direct bool Execute calls under map ownership fail without detached side effects;
+the engine is the authoritative resumable entry point. Existing world execution
+remains synchronous. No native map-AI hooks have been enabled yet.
+
+Reaction selection reports its normal interruption step back to PlayerbotAI before
+execution is admitted. World execution rechecks eligibility; resets and revoked
+identities cannot start an old reaction. ModuleEngineRecoveryTest compiles the
+actual decision, selection, reaction lifecycle and continuation functions and
+exercises rejection, reset/destruction, owner changes, coalescing, exceptions,
+queue discard, state changes, preserved prerequisites and completion ordering.
+ModuleWorldActionsTest compiles the actual queue and checks that callbacks share
+its lifetime/map bounds and never replay a named action as well.
+
+The default-off native PacketBridgeTest also queues a disposable bot's group leave
+under an explicit MapScope and separately checks DEFERRED admission with unchanged
+group membership and later native removal from the group. This remains an internal
+headless/synthetic-session harness, not real-client acceptance.
+
+Source: active Sagiroth-derived TortoiseBots module at base
+0fb3bc0bff08f5a47d8f6c3e3fc2a9528f538c02, Engine.cpp, ReactionEngine.cpp,
+Action.h and the existing BotWorldActions queue. Independently adapted in the
+module; no donor tree or new core hook. Remaining map activation gates include
+trigger/value evaluation, AI prelude and cross-map shared-state ownership.
+
+
+### Random maintenance group leadership (2026-09-12)
+
+RandomBotUpdateAction now resolves the group leader once and treats a missing
+module AI as a human leader. The prior mechanical host conversion applied GetAI
+to `!GetGroupMaster()` and then dereferenced the nullable AI for the actual leader.
+The action preserves the donor's human-led-group and nearby-player exclusions and
+returns the actual ProcessBot result. It declares the world-owner domain because
+maintenance can revive/repopulate a character. ModuleRandomUpdateLeaderTest compiles
+the active action and covers human/AI/self-controlled/missing leaders, nearby
+players, non-random actors, map rejection and native maintenance failure.
+
+Source: active module RandomBotUpdateAction.h at base
+0fb3bc0bff08f5a47d8f6c3e3fc2a9528f538c02, compared to the disabled ManTech donor's
+RandomBotUpdateAction.h. Corrected host adaptation; no new core seam.
+
+
+The same negated-pointer conversion was corrected in GoAction::TellStuck, four
+stuck triggers and SecurityCheckAction. Their source donor predicates were
+`!GetBotAI(player)`, not `GetBotAI(!player)`. Human-led groups now keep their
+intended stuck-recovery exclusions, and random-bot loot security applies to human
+masters again. Loot security resolves nullable master/leader sessions before rank
+and guild queries and declares the world-owner domain. Actual native action tests
+cover rank, guild, loot method/threshold, absent sessions and world ownership.
+PlayerbotAIStorage explicitly deletes the bool lookup overload; the native lookup
+declarations are compiled in ModuleAIIdentityTest with a static assertion that
+Player*/ObjectGuid work and bool cannot compile. This prevents recurrence without
+adding runtime branches or changing the core.
+
+
+### Native administrative refresh (2026-09-12)
+
+Refresh previously delegated only to PlayerbotFactory::Refresh, which supplies
+consumables only when item cheats are enabled. The mature administrator behavior
+also recovered dead bots, reset strategies, repaired durability, restored health,
+mana/energy and PvP state, and replenished spending money. Those operations now use
+the host's native APIs, retain disableRandomLevels/BG boundaries, and return a
+real result to the administrative queue. Native resurrection refusal is honored
+before corpse removal or strategy changes; ModifyMoney retains native hooks and
+the money cap. Network/uncontrolled, transferring and map-owned calls are rejected.
+The separate automatic Revive/ProcessBot policy has not been replaced by this edit.
+
+Source: preserved ManTech donor RandomPlayerbotMgr.cpp::Refresh from baseline
+37aee50d6bfbf9194dd5e3c79a156d9bfcb4f569, adapted into the active module's
+PlayerbotRuntimeFacade.cpp. Native Player::ResurrectPlayer and ModifyMoney were
+traced for host rejection and side effects. ModuleNativeRefreshTest compiles the
+actual adapter and native money function and covers accepted/refused resurrection,
+resources, corpse order, configuration/BG, owner rejection and money saturation.
+
+
+### RPG inn travel cooldown (2026-09-12)
+
+Accepted administrative RPG relocation now clears the old travel target and
+restores its ten-minute cooldown after Reset. This preserves the inn dwell time
+from the ManTech donor RandomPlayerbotMgr.cpp at baseline
+37aee50d6bfbf9194dd5e3c79a156d9bfcb4f569. Native rejected teleports preserve the
+existing target; grind relocations do not acquire the RPG delay. The module uses
+its existing TravelMgr and TravelTarget APIs; there is no new core hook.
+ModuleRandomRelocationTest covers rejection, reset ordering, RPG/grind distinction
+and a missing optional travel target using the actual relocation function.
+
+### World master reconciliation (2026-09-12)
+
+The nonminimal decision postlude now uses ReconcileMasterAndPosture. Existing
+world AI runs it synchronously. Explicit map execution submits one coalesced
+continuation through the existing bounded BotWorldActions queue; it captures no
+Player or AI pointer. Queue rejection/discard releases the pending token, and
+actor lifetime/MapWorkStamp validation remains authoritative. The world phase
+resolves current group membership before durable master bind/release, service
+lease eviction, strategy reset, movement stop and native follow notifications.
+Posture mirroring requires the existing same-map IsSafe predicate. Cross-map
+master ownership remains valid; coordinates on different maps cannot impose
+walking or sitting. Activity overrides now restore through exceptions as well as
+normal returns and nested calls.
+
+Source: active Sagiroth-derived PlayerbotAI.cpp at base
+0fb3bc0bff08f5a47d8f6c3e3fc2a9528f538c02 and current native BotManager ownership
+contracts. Independently adapted inside the module without a new core hook.
+ModuleMasterReconciliationTest compiles the actual postlude and activity scope:
+coalescing, rejected/discarded queues, changed leaders, transfer, failed native
+release, repeated adoption, BG strategy repair, same/cross-map posture and nested
+exception recovery. Joined map-AI activation remains gated on the remaining
+packet/chat prelude, trigger/value and cross-map shared-state contracts.
+
+
+### Background death recovery ownership (2026-09-12)
+
+ProcessBot no longer calls RepopAtGraveyard on every maintenance pass for a dead
+character. That shim repeatedly interrupted native ghost/corpse travel. Active
+ReleaseSpiritAction, ReviveFromCorpseAction and SpiritHealerAction already own
+release, waiting for a human resurrection, native corpse recovery and graveyard
+fallback. Background maintenance now excludes dead, grouped, taxi, BG/queue,
+transferring, logging-out, human-controlled and nearby-human characters, following
+the preserved ManTech ProcessBot eligibility at baseline
+37aee50d6bfbf9194dd5e3c79a156d9bfcb4f569. Expired-value maintenance stays on the
+world owner. Ineligible results also suppress strategy/gear maintenance for that
+slice. Administrative Revive remains a separate compatibility item.
+
+ModuleNativeMaintenanceEligibilityTest compiles the actual facade function and
+checks repeated dead/ghost passes, all eligibility gates, missing AI, map-owner
+rejection and successful quiet-world cache cleanup. The existing 6000-candidate
+service test retains budgeting, fairness and re-resolution after lifecycle change.
+No native core function or new hook was added.
+
+
+### Native TCP acceptance (2026-09-12)
+
+The local protocol fixture completed native realm SRP authentication and realm
+listing, encrypted-header world authentication, creation of two disposable human
+warriors, character enumeration/login, an in-game .bot add command, native Who
+containing the human and owned Headless bot, normal logout, and direct reclaim
+of that bot into the same account's Network session. The module logged release
+of AI control; both servers exited cleanly and all character online flags cleared.
+Artifact-bound evidence is in the runtime reports directory. This is a real TCP
+protocol client, not a graphical game-client playtest or proof of rendered
+movement, transports, combat, custom encounters or scale.
+
+The native protocol uses realm build 7272 (1.18.1) and world-auth build 5875.
+RealmList.cpp and DBCStores.cpp are the respective authorities. The fixture's
+first attempt incorrectly reused the realm build for world auth and was rejected;
+its failed receipt is retained. The fixture was corrected; no server build,
+authentication, addon or anticheat check was weakened. Temporary test configuration
+and fixture credentials stay outside the source repository.
+
+
+### Native resurrection rejection (2026-09-12)
+
+Player::ResurrectPlayer deliberately refuses permanently dead hardcore characters
+unless the caller explicitly supplies forceHc. Corpse reclaim and spirit-healer
+handlers previously continued with corpse removal and durability loss after this
+refusal. They now require IsAlive before those effects. The solo/AI dungeon-entry
+release path similarly removes the corpse and returns through its alive teleport
+only after acceptance; rejection falls through to the existing ghost graveyard
+route. Forced hardcore recovery remains the existing separate native operation.
+These are generic native lifecycle checks, with no bot branches or new hooks.
+
+The module now returns failure from rejected corpse reclaim, spirit-healer and
+repop operations before clearing corpse-run/death state, saving, relocating or
+reporting recovery. NativeResurrectionResultTest compiles the actual reclaim and
+spirit-resurrection functions and dungeon-entry recovery block; it checks normal,
+BG, delayed/distant corpse, hardcore rejection and accepted cleanup ordering.
+
+
+### Social activity snapshot (2026-09-12)
+
+The existing post-map SyncNativePlayers publishes immutable activity facts:
+whether a human/controlled population is online, its friend GUID union, and the
+real-guild classification for referenced bot guilds. Explicit map execution reads
+those values for empty-server/friend/guild priority and relation checks. Existing
+world AI retains current native queries. A snapshot may lag a world transition by
+one join; it affects activity priority only. Permission, membership and ownership
+mutations still resolve current native state on the world owner.
+
+The native PlayerSocial API previously exposed only single-GUID friendship
+queries. Building the union with those queries would scan every player for every
+bot. GetFriendGuids adds a generic value query over the existing friend flags,
+used only on the native social owner; ignored-only entries are excluded. The
+module publishes IDs and booleans with atomic shared_ptr replacement, retaining
+no Player, Guild or social-list pointer. Each referenced guild is classified once
+per publication; no database query or mutation is introduced.
+
+This is an independent host adaptation of the active Sagiroth-derived module,
+base 0fb3bc0bff08f5a47d8f6c3e3fc2a9528f538c02, against native SocialMgr/GuildMgr.
+No lifecycle hook or bot-specific core branch was added. Joined map AI remains
+disabled while packet/chat prelude, trigger/value and other shared-state gates
+are completed.
+
+
+### Administrative native revival (2026-09-12)
+
+The rndbot revive adapter now performs actual native recovery through Refresh,
+reports refusal instead of completing a no-op graveyard release, and clears the
+legacy dead/revive event markers only after accepted resurrection. Alive and BG
+bots are excluded. Rescue uses the existing terrain-validated relocation service:
+nearby grind for an unreleased corpse, level-fitting grind for a ghost. Existing
+group/master, pin, lease, map, combat, taxi and destination checks still apply.
+Failed rescue relocation preserves successful revival at the current location
+and is logged separately; it is not mislabeled as a completed teleport.
+
+Source: ManTech RandomPlayerbotMgr::Revive, RandomTeleport and
+RandomTeleportForLevel at baseline 37aee50d6bfbf9194dd5e3c79a156d9bfcb4f569.
+The donor's live SetPosition loop used while probing nearby candidates was not
+ported; it bypassed native movement/transfer ownership. Existing bounded validated
+destination selection preserves the rescue intent. Automatic ProcessBot never
+calls administrative revival and retains native death AI ownership.
+ModuleNativeRefreshTest compiles both actual adapters, covering native refusal,
+corpse/ghost selection, failed optional relocation, BG/alive/map exclusions,
+event cleanup timing and repeated requests. No core hook or schema was added.
+
+
+### Death recovery world ownership (2026-09-12)
+
+Corpse revival and spirit-healer actions declare RequiresWorldOwner, inherited
+by RepopAction. The existing engine continuation queue moves selection, native
+resurrection, persistence, group changes and optional rescue to the post-map
+world owner. Direct bool Execute callers reject map execution without side
+effects; a pending engine action retains its separate deferred result. Corpse
+movement remains a movement action. This follows native spirit-healer opcode
+world ownership and the module rescue/group registry contracts; native corpse
+reclaim remains a map-capable core handler. No core hook was added and parallel
+AI dispatch remains gated by the remaining control/value ownership audit.
+
+The default-off PacketBridgeTest also checks actual death through native
+self-damage and RandomBotFacade::Revive on its disposable non-hardcore bot below
+level 5. Temporary random eligibility is restored by record generation, including
+unwind. Its level excludes rescue relocation; this validates recovery at the
+current map, not destination selection or ordinary player corpse interaction.
+
+
+### Outgoing notification execution domains (2026-09-12)
+
+The outgoing AI mailbox retains native spell failure/delay and knockback on the
+current map owner. An explicit MapScope no longer parses chat/emote or reads
+foreign Player, guild or channel state. It keeps those notifications queued and
+requests one coalesced post-map continuation through BotWorldActions. That world
+continuation processes social notifications only; newly arrived movement stays
+for the map owner. Ordinary world AI keeps its existing all-notification drain.
+No native opcode routing or engine packet-action queue changed.
+
+Each domain preserves FIFO, including reentrant arrivals and unexpected unwind.
+Native generation still rejects obsolete spatial packets. Failed admission or a
+discarded transfer continuation retains social packets in the same AI lifetime
+and releases its retry token; no Player/AI pointer is retained by the callback.
+ModuleOwnerPacketTest compiles the actual mailbox producer/drain and checks
+domain separation, coalescing, rejection, discard/retry, transfer, malformed
+events, mixed-domain exceptions and concurrent foreign-map chat producers.
+This removes one prerequisite; the remaining control prelude and shared values
+still block enabling joined map AI. No new host hook was introduced.
+
+
+### World-owned guild decision values (2026-09-12)
+
+Guild orders and sharing currently inspect native guild notes, all online guild
+members' roles and inventories, and other AI contexts. Action deferral alone
+cannot protect these reads: trigger/value evaluation precedes action selection.
+The existing CalculatedValue cache has no owner dispatch; copying every guild
+inventory every tick would add unrelated world scanning. The module therefore
+adds an explicit WorldCalculatedValue specialization for copied decision facts.
+It reuses BotWorldActions and existing value intervals. World callers calculate
+synchronously. Map callers return the last completed result (empty before the
+first completion) and coalesce one due world refresh. They do not advance cache
+time merely because a refresh was requested. Existing dependent-value intervals
+and one world join can delay observing a newly assigned order.
+
+Only guild order, share list, craft/farm/quest-reward orders and the missing
+reagent item-ID vector opt in. Map travel selection caches reagent IDs for five seconds, avoiding repeated
+guild-wide inventory scans. World purchase callers retain a fresh calculation. Actual purchase/item-transfer actions retain native live
+eligibility checks. No live Player/Unit/Item pointer is stored in these results.
+Nested guild dependencies compute synchronously on the world owner. The callback
+holds names and weak value epochs; Reset/destruction cancels obsolete work, and
+native actor lifetime/map stamps handle logout/reclaim/transfer. Admission
+failure or discarded work remains due for retry. World queue capacity and time
+budgets are unchanged; no per-tick eager guild or database scan was added.
+
+GuildShareTarget still requires separate live receiver identity review. This
+change does not enable map AI or declare the rest of the value graph safe.
+The donor guild parsing, role filters, deficit and choice algorithms remain in
+GuildValues.cpp. This is an independently implemented module ownership adapter;
+no new native host seam or schema was required.
+
+ModuleWorldValueTest compiles the actual cache and base value implementation; it covers last-completed facts, nested dependencies, coalescing, admission rejection, discarded work, Reset and destruction/replacement.
+
+
+### Guild sharing receiver identity (2026-09-12)
+
+GuildShareTarget now contains a receiver GUID instead of a cached Player pointer.
+Its decision calculation also uses WorldCalculatedValue because it inspects
+another AI's inventory/role. The native world phase resolves current nearby
+members; a stale nearest-player GUID cannot inspect a different live map.
+GuildShareItemAction is world-owned and rejects direct map execution. It refreshes
+the target/amount at execution and resolves the GUID through the sender's actual
+native map, checking living, in-world, non-transferring, same-guild actors and
+receiver AI availability before accessing inventory. Map triggers read copied
+target facts; item mutations remain in the world phase.
+
+The existing manual whole/partial item transfer is still awaiting replacement
+by the native trade flow, including Turtle restrictions and timed acceptance.
+This identity change alone is not complete guild-transfer acceptance.
+
+
+### Native AI control phase (2026-09-12)
+
+Reaction command parsing and internal chat replies/packet-trigger preparation
+now enter the world phase explicitly. In MapScope they coalesce bounded native
+world continuations, retaining only a method selector and retry token. The
+existing BotWorldActions lifetime/map-generation validation resolves the current
+AI at execution. Empty queues schedule no work; rejected/discarded requests stay
+queued and retry. PacketHandlingHelper exposes a mutex-protected pending check.
+
+World AI retains synchronous parsing and the prior command/reply/packet order.
+Native logout still pauses decisions without taking session teardown into AI.
+Map decisions continue locally; they observe prepared external triggers on a
+subsequent map pass. Local spell/movement notifications use their separate map
+mailbox drain. This does not execute the full AI loop on the world queue.
+Cross-map master reads, other shared values and actions remain under audit;
+joined map hooks are still disabled. No native hook or schema was added.
+
+
+### Native guild item trades (2026-09-12)
+
+Guild item sharing now creates a native trade offer and completes it through
+HandleInitiateTradeOpcode, HandleBeginTradeOpcode, HandleSetTradeItemOpcode and
+both native HandleAcceptTradeOpcode calls. Partial stacks use native SplitItem
+in an empty validated inventory position, preserving the core's CloneItem
+metadata and rejection/rollback behavior. The old manual ownership mutation,
+CreateItem reconstruction and sender-only early save are removed. Native trade
+retains faction, hardcore, binding, raid-item trading, bag-space, scam-prevention,
+logging and persistence behavior. No native trade check or delay is bypassed.
+
+NativeGuildTrades is a bounded module world-phase interaction owner (64 offers;
+at most 8 completions/cancellations and a 4ms soft budget per update). An ordinary
+map-stamped action continuation would discard a transferred request without
+canceling its already-open trade, including a nearby same-map teleport. The
+native player event processor also runs on maps. This service therefore uses
+the existing post-map BotManager update/removal guard and checks pending offers
+even when their map stamp changes, so it can cancel its own unchanged native
+offer. It adds no core hook, thread, sleep or persistent parallel trade system.
+
+Each offer carries revocable native Player identities, both map stamps, both
+master GUIDs and the exact item/amount. Removed/reclaimed actors are left to
+native logout cancellation; changed money/spells/items are not overwritten.
+Map/ownership/guild/eligibility changes cancel only the unchanged owned offer.
+Acceptance waits at least the native interval plus one second for its time_t
+resolution. Completion requires the native trade to close and exact conserved
+inventory deltas on both players. Shutdown cancels remaining unchanged offers.
+An action success reports an offered gift; the separate completion log records
+the actual transfer result. There is no success announcement before transfer.
+
+Source: the pinned native core's TradeHandler.cpp, Player::SplitItem,
+Player::RemoveFromWorld, and Item::CloneItem/CanBeTraded; guild sharing intent
+comes from the active Sagiroth-derived GuildShareItemAction and GuildValues.
+The service is independently implemented against native contracts. Its runtime
+acceptance passed on candidate 7ada3310: partial four-item and whole six-item trades, both native completion receipts, temporary guild/item cleanup, and clean shutdown.
+
+
+### Disposable native guild-trade diagnostic (2026-09-12)
+
+The default-off PacketBridgeTest now places its verified disposable bots together
+through native teleport/ack and stay actions, then creates TBPLAYNativeGift only
+when neither actor has a guild and neither owns item 117. Native Guild::Create,
+AddMember and a ten-item native inventory insertion prepare the fixture. The
+actual NativeGuildTrades service must move four items through a partial native
+split/trade, then the remaining six through a whole-stack native trade. The test
+requires conserved 6/4 and 0/10 inventories, disbands only its created guild and
+destroys only its introduced items, saving both inventories before continuing
+stranded-session cleanup. Existing guilds/items cause rejection, not deletion.
+Timeouts fail explicitly and attempt fixture cleanup. Python verifies the exact
+TBPLAY account/characters before enabling the diagnostic; production defaults
+remain off. New required receipts: native guild partial trade, whole trade and
+cleanup. Native core trade restrictions remain enabled during validation.
+
+ModuleNativeGuildTradesTest compiles the actual service with native-operation fixtures: delayed partial/whole transfers, metadata retention, item conservation, rejected initiation/splitting/set/accept, full bags, canceled acceptance, map/master changes, altered-trade preservation, shutdown, 64-offer admission and bounded per-tick progress. ModuleBotDispatchTest verifies trade callbacks share the native AI-removal guard.
+
+
+### Party decision locality (2026-09-12)
+
+Same-instance party decision port: active Sagiroth-derived value intent at module baseline 0fb3bc0bff08f5a47d8f6c3e3fc2a9528f538c02 retained, with the native PlayerbotAI::IsSafe seam applied before health/combat/position/AI reads. AoeHealValues, StatsValues, LineTargetValue, AttackerCountValues, CcTargetValue, AttackersValue, GrindTargetValue and TargetValue now reject foreign instances and transferring members. Near-leader uses one validated leader identity. GroupBoolCountValue previously returned zero at the first match (return count++); it now counts every eligible matching bot. Healer subgroup/range rules and offline/non-bot filtering remain intact. ModulePartyLocalityTest covers the actual guard and representative algorithms; this is not live dungeon acceptance.
+
+
+### World readiness and guild metadata (2026-09-12)
+
+GroupReadyValue retains its active donor calculation, now through WorldCalculatedValue<bool>; this preserves cross-map dungeon readiness intent instead of dropping remote dead party members. GuildMotdValue copies native Guild::GetMOTD during world evaluation, with the existing guild-meeting time parsing retained. WorldCalculatedValue callbacks now retain qualified context identity. Native guild diagnostic restores a non-hardcore ghost leader through native resurrection and moves the pair to the race/class data-defined starting position; the prior failure was an accurately rejected dead sender (saved PLAYER_FLAGS_GHOST and corpse row), not permission to weaken trade restrictions.
+
+
+### Remaining world services (2026-09-12)
+
+Automatic mail return: active Sagiroth-derived CheckMailAction intent at 0fb3bc0bff08f5a47d8f6c3e3fc2a9528f538c02 was to return unrequested items from online human senders. It reconstructed only the first attachment, then deleted mail/mail_items directly even for requested mail. The port delegates the complete return to Penqle-derived WorldSession::HandleMailReturnToSender (core 00203fd8ff1de6415b546f0bf7c3babc28e69599), retaining native mailbox, delivery, attachments, money, transaction and notification behavior. It skips hardcore senders because native return would drop those messages. ModuleAutomaticMailReturnTest validates action control and deletion lifetime; it is not a live mail-delivery test. World domains were also declared for remaining travel selection/request, guild petition/tabard, speech and gear actions after tracing their foreign-player, guild, shared text and database work.
+
+
+### Native party gifts (2026-09-12)
+
+Party gifts preserve GiveItemAction's active donor intent to supply bot party members with missing usable conjured food/water. The old direct inventory ownership mutation could bypass trade restrictions/persistence and dereference an item after a merge. OfferParty reuses the native guild gift mechanism with current native Group identity instead of guild identity. ModuleNativeGuildTradesTest now covers unguilded party acceptance, replacement/removal cancellation, and preserved inventories. Default-off PacketBridgeTest adds a three-item unguilded party trade after its guild checks, then native disband and item cleanup.
+
+
+### Cross-map owner observations (2026-09-12)
+
+Owner-state boundary port retains the active donor decision algorithms and native CalculatedValue/MemoryCalculatedValue semantics. MasterPositionValue uses a WorldCalculatedValue decorator around its existing MemoryCalculatedValue base, preserving change intervals/history used by movement triggers. FreeMoveCenterValue and RangeFilterValue retain copied GuidPosition results and cross-map reference intent. MasterNeedsQuestItemValue delegates existing ItemUsageValue::IsNeededForQuest on the world owner, and MasterTeleportingValue defers the foreign teleport read. PlayerbotAI logout cancellation uses native HandleLogoutCancelOpcode only after map work joins; a reset still cannot cancel a logout already due. Scoped master/local party checks protect consumable durations, stance orientation and trade enchant targets. Actual cache-history and cancellation regressions cover these boundaries; joined map hooks are not yet enabled.
+
+
+### Follow domains and serial map probe (2026-09-12)
+
+Cross-map follow preserves the active FollowAction/MovementAction::Follow behavior by declaring a world domain only for foreign or transferring follow targets. Native map-local follow is retained. FindCorpseAction and FleeToMasterAction need world ownership because their recovery/travel checks read other-map owner state. ChatCommandAction provides the common native world boundary for SQL/session/global command descendants; their existing entry processing was already world-owned. A temporary default-off PacketBridgeTest serial MapScope probe exercises the complete mature update with deferred controls, values and actions before switching the production scheduler; remove this temporary world-loop branch when native map hooks replace it.
+
+
+### Native map AI ownership (2026-09-12)
+
+The selected module now registers the existing OnAIUpdate and IsAIUpdateDue
+player hooks. Native Map::UpdatePlayerAI owns GUID/generation validation,
+foreground admission, bounded idle batches, elapsed clocks and joined map
+lifetime. PlayerbotAIAdapter establishes MapScope and retains malformed-packet
+containment; network ownership, transfers, missing engines and pending logout
+reject AI execution. BotManager no longer executes individual AI on the world
+loop. It retains native teleport acknowledgements, lifecycle reconciliation,
+logout consumption and bounded world continuations/trades after maps join.
+
+The active Sagiroth-derived UpdateAI performs packet/movement/reaction work
+before its action-delay gate. IsAIUpdateDue therefore admits each usable AI to
+the native budget instead of treating action delay as permission to skip that
+work. Decisions still use their original delay. No new core hook or alternate
+scheduler is introduced. The default-off packet diagnostic reports native map
+AI only after execution through this hook; its transitional serial probe is
+removed. Build/runtime acceptance is recorded separately with executable hashes.
+Source: current native Map.cpp/ScriptObjects hooks and the pinned active
+Sagiroth-derived PlayerbotAI::UpdateAI; independently implemented adapter seam.
+
+Bot TellPlayer/TellPlayerNoFacing messages from map decisions now retain copied text/options and a revocable recipient Event, then run security, repeat suppression and delivery on the world owner. Admission does not report completed delivery. Facing requires the actual same map/instance. TellPlayer forwards ignoreSilent to the intended argument while retaining repeat suppression.
+
+
+### Pending invitations survive strategy refresh (2026-09-13)
+
+A real TCP regression showed the native server successfully inviting a bot,
+then the initial `update pve strats` action rebuilding the graph before its
+queued `accept invitation` ran. The packet event was consumed but the native
+Player still held its pending Group invitation. GroupInvitationTrigger now
+reads that existing native pointer as a boolean; it retains no Group object
+and introduces no second invitation state. The unchanged world-owned
+AcceptInvitationAction resolves the current inviter, checks security, and
+uses native HandleGroupAcceptOpcode. Native accept, decline and cancellation
+remove the trigger condition. ModulePendingGroupInviteTest covers graph
+replacement, deferred decisions, cancellation and a new invitation. The failed
+runtime trace is preserved in the local reports history; repeated live invite
+acceptance must pass on the new artifact before this defect is marked resolved.
+Source: current native GroupHandler.cpp and Player::GetGroupInvite, active
+Engine::Init/Reset and AcceptInvitationAction; independently implemented trigger.
+
+
+### Local native acceptance checkpoint (2026-09-13)
+
+The native module and bots-disabled builds use separate output directories.
+The selected module runs through the core's existing joined map hooks, with no
+additional core hook for this dispatch change. The disabled legacy bot tree is
+retained solely as source/reference and contributes no object to either local
+build. Source histories and uncommitted work remain preserved.
+
+The final pending-invitation trigger also excludes the native pending group's
+leader. Regression coverage is 133 passing tests, including native pending
+invitation survival across class-strategy rebuild, cancellation and leader
+handling. The deployed candidate's artifact-bound receipts include 16 native
+lifecycle/trade checks and 15 real TCP owner-journey checks: nine invitation
+cycles, cross-continent teleport/ack/summon, logout and human reclaim. Earlier
+artifact-bound tests separately cover real client movement, stay/follow and
+native combat damage/kill. Exact hashes, population measurements and remaining
+graphical/dungeon/BG/scale acceptance are recorded in the local output reports;
+these source notes do not claim that every encounter or client presentation was
+played through.
+
+
+## Sagiroth main refresh, September 13
+
+Integrated Sagiroth/TortoiseBots main through
+d477d743a85c44bf1cefc7d4d120d84ba0511d02 from common base
+1da06b8110dc0bffacb9124593237abb2e0cf7f6. Includes beginner beast grinding,
+one-time persistent-level skill/profession seeding, low-level travel area gates,
+challenge exclusions and lethal-killer tracking, external observability roster,
+module verbosity and empty-chat guards. Three-way conflicts preserve ManTech
+packet/lifetime queues, native guild trades, Thorn support and regression hooks.
+Engine logging honors either explicit EnableActionLog or upstream debug strategy.
+Local throughput/config/reset corrections are described in configuration-tuning.
+Runtime testing was explicitly declined for this build by the user.

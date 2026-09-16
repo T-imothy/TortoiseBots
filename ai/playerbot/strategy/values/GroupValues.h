@@ -2,6 +2,7 @@
 #include "playerbot/PlayerbotAI.h"
 #include "playerbot/strategy/AiObjectContext.h"
 #include "playerbot/strategy/Value.h"
+#include "playerbot/strategy/WorldCalculatedValue.h"
 
 namespace ai
 {
@@ -47,10 +48,10 @@ namespace ai
         virtual bool Calculate() override;
     };
 
-    class GroupReadyValue : public BoolCalculatedValue, public Qualified
+    class GroupReadyValue : public WorldCalculatedValue<bool>, public Qualified
     {
     public:
-        GroupReadyValue(PlayerbotAI* ai) : BoolCalculatedValue(ai, "group ready", 2), Qualified() {}
+        GroupReadyValue(PlayerbotAI* ai) : WorldCalculatedValue<bool>(ai, "group ready", 2), Qualified() {}
         virtual bool Calculate() override;
     };
 }

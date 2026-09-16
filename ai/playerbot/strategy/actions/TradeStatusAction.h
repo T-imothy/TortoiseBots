@@ -7,6 +7,7 @@ namespace ai
     class TradeStatusAction : public QueryItemUsageAction
     {
     public:
+        bool RequiresWorldOwner() const override { return true; }
         TradeStatusAction(PlayerbotAI* ai) : QueryItemUsageAction(ai, "accept trade") {}
         virtual bool Execute(Event& event) override;
 

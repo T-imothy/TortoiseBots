@@ -1,3 +1,5 @@
+#include "runtime/NativeGuildTrades.h"
+#include "runtime/BotWorldActions.h"
 #include "playerbot/playerbot.h"
 #include "GuildShareItemAction.h"
 #include "playerbot/ServerFacade.h"
@@ -9,7 +11,7 @@ bool GuildShareItemAction::isUseful()
     if (!bot->GetGuildId())
         return false;
 
-    if (bot->IsInCombat())
+    if (bot->IsInCombat() || bot->GetTradeData())
         return false;
 
     return AI_VALUE(GuildShareTarget, "guild share target").IsValid();
@@ -17,11 +19,22 @@ bool GuildShareItemAction::isUseful()
 
 bool GuildShareItemAction::Execute(Event& event)
 {
+    if (auto deferred = TortoiseBots::BotWorldActions::Instance().Defer(bot, getName(), event))
+        return *deferred;
+    if (!bot->IsAlive() || !bot->IsInWorld() || !bot->GetMap() || bot->IsBeingTeleported() || bot->IsInCombat())
+        return false;
+    // Re-evaluate recipient and amounts at execution, not the trigger's cached
+    // decision. A saved GUID never grants access to a reclaimed Player object.
+    RESET_AI_VALUE(GuildShareTarget, "guild share target");
     GuildShareTarget shareTarget = AI_VALUE(GuildShareTarget, "guild share target");
     if (!shareTarget.IsValid())
         return false;
 
-    Player* receiver = shareTarget.receiver;
+    Player* receiver = bot->GetMap()->GetPlayer(shareTarget.receiverGuid);
+    if (!receiver || receiver == bot || !PlayerbotAI::IsSafe(bot, receiver) ||
+        !receiver->IsAlive() || receiver->IsInCombat() || !bot->GetGuildId() ||
+        receiver->GetGuildId() != bot->GetGuildId())
+        return false;
     uint32 itemId = shareTarget.itemId;
     uint32 shareAmount = shareTarget.amount; // 0 = give all (existing behavior)
 
@@ -32,59 +45,13 @@ bool GuildShareItemAction::Execute(Event& event)
     std::vector<Item*> items = ai->GetInventoryItems();
     for (Item* item : items)
     {
-        if (item->GetProto()->ItemId != itemId)
+        if (item->GetEntry() != itemId)
             continue;
-
-        uint32 stackCount = item->GetCount();
-        uint32 giveCount = (shareAmount > 0 && shareAmount < stackCount) ? shareAmount : stackCount;
-
-        if (giveCount == stackCount)
-        {
-            ItemPosCountVec dest;
-            InventoryResult msg = receiver->CanStoreItem(NULL_BAG, NULL_SLOT, dest, item, false);
-            if (msg != EQUIP_ERR_OK)
-            {
-                sLog.outDetail("Bot #%d <%s> cannot give %s to %s - bags full",
-                    bot->GetGUIDLow(), bot->GetName(), item->GetProto()->Name1, receiver->GetName());
-                return false;
-            }
-
-            bot->MoveItemFromInventory(item->GetBagSlot(), item->GetSlot(), true);
-            item->SetOwnerGuid(receiver->getObjectGuid());
-            receiver->MoveItemToInventory(dest, item, true);
-
-            std::ostringstream receiverOut;
-            receiverOut << "Got " << chat->formatItem(item, giveCount) << " from guild member " << bot->GetName();
-            receiverAi->TellPlayerNoFacing(receiverAi->GetMaster(), receiverOut.str(), PlayerbotSecurityLevel::PLAYERBOT_SECURITY_ALLOW_ALL, false);
-        }
-        else
-        {
-            ItemPosCountVec dest;
-            InventoryResult msg = receiver->CanStoreNewItem(NULL_BAG, NULL_SLOT, dest, itemId, giveCount);
-            if (msg != EQUIP_ERR_OK)
-            {
-                sLog.outDetail("Bot #%d <%s> cannot give %s to %s - bags full",
-                    bot->GetGUIDLow(), bot->GetName(), item->GetProto()->Name1, receiver->GetName());
-                return false;
-            }
-
-            item->SetCount(stackCount - giveCount);
-            item->SetState(ITEM_CHANGED, bot);
-            bot->SaveInventoryAndGoldToDB();
-
-            Item* newItem = Item::CreateItem(itemId, giveCount, receiver);
-            if (!newItem)
-                return false;
-
-            receiver->StoreItem(dest, newItem, true);
-
-            std::ostringstream receiverOut;
-            receiverOut << "Got " << chat->formatItem(newItem, giveCount) << " from guild member " << bot->GetName();
-            receiverAi->TellPlayerNoFacing(receiverAi->GetMaster(), receiverOut.str(), PlayerbotSecurityLevel::PLAYERBOT_SECURITY_ALLOW_ALL, false);
-        }
-
-        return true;
+        uint32 const count = shareAmount ? std::min(shareAmount, item->GetCount()) : item->GetCount();
+        // Success here means an actual native offer was created. The service
+        // observes timed acceptance and logs completed/canceled separately.
+        if (TortoiseBots::NativeGuildTrades::Offer(bot, receiver, item, count))
+            return true;
     }
-
     return false;
 }
